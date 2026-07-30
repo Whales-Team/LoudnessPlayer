@@ -2,6 +2,7 @@ package com.wzl.loudnessplayer.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,14 +23,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -61,12 +64,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.wzl.loudnessplayer.R
 import com.wzl.loudnessplayer.PlayerUiState
 import com.wzl.loudnessplayer.audio.Normalization
+import com.wzl.loudnessplayer.data.AudioFileFormat
 import com.wzl.loudnessplayer.data.AudioTrack
+import com.wzl.loudnessplayer.data.groupedByArtist
 import java.util.Locale
 import kotlin.math.roundToLong
 
@@ -74,19 +82,23 @@ import kotlin.math.roundToLong
 @Composable
 fun LoudnessPlayerApp(
     state: PlayerUiState,
-    onImport: () -> Unit,
+    onImportFiles: () -> Unit,
+    onImportFolder: () -> Unit,
+    onScanDevice: () -> Unit,
     onTrackClick: (String) -> Unit,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onSeek: (Long) -> Unit,
     onNormalizationChanged: (Boolean) -> Unit,
+    onGroupedByArtistChanged: (Boolean) -> Unit,
     onAnalyze: (String) -> Unit,
     onRemove: (String) -> Unit,
     onMessageConsumed: () -> Unit,
 ) {
     LoudnessPlayerTheme {
         val snackbarHostState = remember { SnackbarHostState() }
+        var importMenuExpanded by remember { mutableStateOf(false) }
         LaunchedEffect(state.message) {
             state.message?.let {
                 snackbarHostState.showSnackbar(it)
@@ -101,20 +113,30 @@ fun LoudnessPlayerApp(
                         Column {
                             Text("响度播放器", fontWeight = FontWeight.SemiBold)
                             Text(
-                                "本地 MP3 · 无损原文件",
+                                "MP3 · FLAC · WAV · APE",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     },
                     actions = {
-                        FilledTonalButton(
-                            onClick = onImport,
-                            modifier = Modifier.padding(end = 12.dp),
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("导入")
+                        Box {
+                            FilledTonalButton(
+                                onClick = { importMenuExpanded = true },
+                                enabled = !state.isImporting,
+                                modifier = Modifier.padding(end = 12.dp),
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (state.isImporting) "导入中" else "导入")
+                            }
+                            ImportMenu(
+                                expanded = importMenuExpanded,
+                                onDismiss = { importMenuExpanded = false },
+                                onImportFiles = onImportFiles,
+                                onImportFolder = onImportFolder,
+                                onScanDevice = onScanDevice,
+                            )
                         }
                     },
                 )
@@ -153,6 +175,15 @@ fun LoudnessPlayerApp(
                 }
 
                 item {
+                    ImportActionsCard(
+                        isImporting = state.isImporting,
+                        onImportFiles = onImportFiles,
+                        onImportFolder = onImportFolder,
+                        onScanDevice = onScanDevice,
+                    )
+                }
+
+                item {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -176,12 +207,48 @@ fun LoudnessPlayerApp(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                        Spacer(Modifier.width(8.dp))
+                        FilledTonalButton(
+                            onClick = {
+                                onGroupedByArtistChanged(!state.groupedByArtist)
+                            },
+                        ) {
+                            Icon(Icons.Default.Person, contentDescription = null)
+                            Spacer(Modifier.width(5.dp))
+                            Text(if (state.groupedByArtist) "显示全部" else "按演唱者分类")
+                        }
                     }
                 }
 
                 if (state.tracks.isEmpty()) {
                     item {
-                        EmptyLibrary(onImport = onImport)
+                        EmptyLibrary(
+                            onImportFiles = onImportFiles,
+                            onImportFolder = onImportFolder,
+                            onScanDevice = onScanDevice,
+                        )
+                    }
+                } else if (state.groupedByArtist) {
+                    state.tracks.groupedByArtist().forEach { group ->
+                        item(key = "artist:${group.artist}") {
+                            ArtistHeader(
+                                artist = group.artist,
+                                count = group.tracks.size,
+                            )
+                        }
+                        items(
+                            items = group.tracks,
+                            key = AudioTrack::id,
+                        ) { track ->
+                            TrackRow(
+                                track = track,
+                                selected = track.id == state.currentTrackId,
+                                analyzing = track.id in state.analyzingIds,
+                                onClick = { onTrackClick(track.id) },
+                                onAnalyze = { onAnalyze(track.id) },
+                                onRemove = { onRemove(track.id) },
+                            )
+                        }
                     }
                 } else {
                     items(state.tracks, key = AudioTrack::id) { track ->
@@ -197,6 +264,132 @@ fun LoudnessPlayerApp(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ImportMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onImportFiles: () -> Unit,
+    onImportFolder: () -> Unit,
+    onScanDevice: () -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+    ) {
+        DropdownMenuItem(
+            text = { Text("选择音频文件") },
+            leadingIcon = { Icon(Icons.Default.Add, null) },
+            onClick = {
+                onDismiss()
+                onImportFiles()
+            },
+        )
+        DropdownMenuItem(
+            text = { Text("导入整个文件夹") },
+            leadingIcon = { Icon(Icons.Default.Folder, null) },
+            onClick = {
+                onDismiss()
+                onImportFolder()
+            },
+        )
+        DropdownMenuItem(
+            text = { Text("一键扫描手机音频") },
+            leadingIcon = { Icon(Icons.Default.PhoneAndroid, null) },
+            onClick = {
+                onDismiss()
+                onScanDevice()
+            },
+        )
+    }
+}
+
+@Composable
+private fun ImportActionsCard(
+    isImporting: Boolean,
+    onImportFiles: () -> Unit,
+    onImportFolder: () -> Unit,
+    onScanDevice: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilledTonalButton(
+                    onClick = onImportFiles,
+                    enabled = !isImporting,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(5.dp))
+                    Text("选择文件")
+                }
+                FilledTonalButton(
+                    onClick = onImportFolder,
+                    enabled = !isImporting,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.Folder, contentDescription = null)
+                    Spacer(Modifier.width(5.dp))
+                    Text("整个文件夹")
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            FilledTonalButton(
+                onClick = onScanDevice,
+                enabled = !isImporting,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.PhoneAndroid, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text(if (isImporting) "正在识别手机音频…" else "一键识别并导入手机全部音频")
+            }
+            if (isImporting) {
+                Spacer(Modifier.height(10.dp))
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArtistHeader(
+    artist: String,
+    count: Int,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 6.dp, top = 10.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.Person,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            artist,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            "$count 首",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -324,6 +517,7 @@ private fun TrackRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            FormatBadge(track.format)
             if (analyzing) {
                 CircularProgressIndicator(
                     modifier = Modifier
@@ -343,8 +537,17 @@ private fun TrackRow(
                     onDismissRequest = { menuExpanded = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("重新分析响度") },
+                        text = {
+                            Text(
+                                if (track.format.supportsLoudnessAnalysis) {
+                                    "重新分析响度"
+                                } else {
+                                    "APE 暂不支持响度分析"
+                                },
+                            )
+                        },
                         leadingIcon = { Icon(Icons.Default.BarChart, null) },
+                        enabled = track.format.supportsLoudnessAnalysis,
                         onClick = {
                             menuExpanded = false
                             onAnalyze()
@@ -361,6 +564,24 @@ private fun TrackRow(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FormatBadge(format: AudioFileFormat) {
+    Box(
+        modifier = Modifier
+            .padding(start = 4.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+    ) {
+        Text(
+            format.displayName,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -382,18 +603,24 @@ private fun LoudnessBadge(loudnessLufs: Double?) {
 }
 
 @Composable
-private fun EmptyLibrary(onImport: () -> Unit) {
+private fun EmptyLibrary(
+    onImportFiles: () -> Unit,
+    onImportFolder: () -> Unit,
+    onScanDevice: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 56.dp),
+            .padding(vertical = 34.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(
-            Icons.Default.Tune,
-            contentDescription = null,
-            modifier = Modifier.size(56.dp),
-            tint = MaterialTheme.colorScheme.primary,
+        Image(
+            painter = painterResource(R.drawable.app_cover),
+            contentDescription = "音悦应用封面",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(132.dp)
+                .clip(RoundedCornerShape(28.dp)),
         )
         Spacer(Modifier.height(16.dp))
         Text(
@@ -402,14 +629,26 @@ private fun EmptyLibrary(onImport: () -> Unit) {
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            "导入一个或多个 MP3 文件即可开始",
+            "支持 MP3、FLAC、WAV、APE",
             modifier = Modifier.padding(top = 4.dp, bottom = 18.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        FilledTonalButton(onClick = onImport) {
+        FilledTonalButton(onClick = onScanDevice) {
+            Icon(Icons.Default.PhoneAndroid, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("一键导入手机音频")
+        }
+        Spacer(Modifier.height(8.dp))
+        FilledTonalButton(onClick = onImportFolder) {
+            Icon(Icons.Default.Folder, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("导入整个文件夹")
+        }
+        Spacer(Modifier.height(8.dp))
+        FilledTonalButton(onClick = onImportFiles) {
             Icon(Icons.Default.Add, contentDescription = null)
             Spacer(Modifier.width(6.dp))
-            Text("选择 MP3")
+            Text("选择音频文件")
         }
     }
 }

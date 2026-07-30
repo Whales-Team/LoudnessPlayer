@@ -1,6 +1,9 @@
 package com.wzl.loudnessplayer
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -9,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wzl.loudnessplayer.ui.LoudnessPlayerApp
 
@@ -33,16 +37,65 @@ class MainActivity : ComponentActivity() {
                 }
                 viewModel.importTracks(uris)
             }
+            val folderPicker = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocumentTree(),
+            ) { uri ->
+                if (uri != null) {
+                    runCatching {
+                        contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                        )
+                    }
+                    viewModel.importFolder(uri)
+                }
+            }
+            val permissionPicker = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestPermission(),
+            ) { granted ->
+                if (granted) {
+                    viewModel.importDeviceAudio()
+                } else {
+                    viewModel.notifyAudioPermissionDenied()
+                }
+            }
+            val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                Manifest.permission.READ_MEDIA_AUDIO
+            } else {
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            }
 
             LoudnessPlayerApp(
                 state = state,
-                onImport = { picker.launch(arrayOf("audio/mpeg", "audio/mp3", "audio/*")) },
+                onImportFiles = {
+                    picker.launch(
+                        arrayOf(
+                            "audio/*",
+                            "application/octet-stream",
+                            "application/x-ape",
+                        ),
+                    )
+                },
+                onImportFolder = { folderPicker.launch(null) },
+                onScanDevice = {
+                    if (
+                        ContextCompat.checkSelfPermission(
+                            this,
+                            audioPermission,
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        viewModel.importDeviceAudio()
+                    } else {
+                        permissionPicker.launch(audioPermission)
+                    }
+                },
                 onTrackClick = viewModel::playTrack,
                 onPlayPause = viewModel::togglePlayback,
                 onPrevious = viewModel::playPrevious,
                 onNext = viewModel::playNext,
                 onSeek = viewModel::seekTo,
                 onNormalizationChanged = viewModel::setNormalizationEnabled,
+                onGroupedByArtistChanged = viewModel::setGroupedByArtist,
                 onAnalyze = viewModel::analyzeTrack,
                 onRemove = viewModel::removeTrack,
                 onMessageConsumed = viewModel::consumeMessage,

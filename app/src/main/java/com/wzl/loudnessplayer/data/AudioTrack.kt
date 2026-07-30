@@ -6,7 +6,7 @@ data class AudioTrack(
     val title: String,
     val artist: String,
     val durationMs: Long,
+    val format: AudioFileFormat = AudioFileFormat.MP3,
     val loudnessLufs: Double? = null,
     val samplePeakDbfs: Double? = null,
 )
-
