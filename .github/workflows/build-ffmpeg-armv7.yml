@@ -1,0 +1,134 @@
+name: Build ARMv7 FFmpeg JNI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened]
+    paths:
+      - ".github/workflows/build-ffmpeg-armv7.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-armv7:
+    if: github.event_name == 'workflow_dispatch' || github.event.action == 'opened'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out pinned FFmpegKit source
+        uses: actions/checkout@v4
+        with:
+          repository: ffmpegkit-maintained/ffmpeg
+          ref: 62b07bf097baf26b416c815aea514e05c9ad6d63
+          path: ffmpeg-source
+          submodules: recursive
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf automake libtool pkg-config curl git \
+            build-essential yasm nasm gperf texinfo bison ragel \
+            python3 python3-pip unzip zip wget meson ninja-build \
+            doxygen cmake autogen autopoint groff gtk-doc-tools libtasn1-bin
+
+      - name: Install Android platform and NDK r27c
+        run: |
+          set +o pipefail
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          set -o pipefail
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" \
+            "ndk;27.2.12479018"
+          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Build minimal armeabi-v7a FFmpegKit
+        working-directory: ffmpeg-source/android-8.1-lts
+        run: |
+          ./android.sh \
+            --enable-android-media-codec \
+            --enable-android-zlib \
+            --api-level=24 \
+            --disable-arm-v7a-neon \
+            --disable-arm64-v8a \
+            --disable-x86 \
+            --disable-x86-64
+
+      - name: Print build log on failure
+        if: failure() || cancelled()
+        working-directory: ffmpeg-source/android-8.1-lts
+        run: cat build.log || true
+
+      - name: Extract and verify ARMv7 JNI libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          aar="ffmpeg-source/android-8.1-lts/prebuilt/bundle-android-aar/ffmpeg-kit/ffmpeg-kit.aar"
+          extract_dir="${RUNNER_TEMP}/ffmpeg-armv7-aar"
+          output_dir="${GITHUB_WORKSPACE}/ffmpeg-armv7-jni/armeabi-v7a"
+          mkdir -p "$extract_dir" "$output_dir"
+          unzip -q "$aar" -d "$extract_dir"
+          cp "$extract_dir"/jni/armeabi-v7a/*.so "$output_dir"/
+
+          expected=(
+            libavcodec.so
+            libavdevice.so
+            libavfilter.so
+            libavformat.so
+            libavutil.so
+            libc++_shared.so
+            libffmpegkit.so
+            libffmpegkit_abidetect.so
+            libswresample.so
+            libswscale.so
+          )
+          for library in "${expected[@]}"; do
+            test -f "$output_dir/$library"
+          done
+          test "$(find "$extract_dir/jni" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1
+
+          strings "$output_dir/libavcodec.so" | grep -F "Monkey's Audio"
+          strings "$output_dir/libavcodec.so" | grep -F "FLAC"
+
+          fail=0
+          while IFS= read -r so; do
+            min_exp=99
+            while IFS= read -r exp; do
+              [[ -z "$exp" ]] && continue
+              (( exp < min_exp )) && min_exp=$exp
+            done < <(objdump -p "$so" | grep -A1 LOAD | grep -oE 'align 2\*\*[0-9]+' | grep -oE '[0-9]+$')
+            echo "$so: align=2**${min_exp}"
+            if (( min_exp < 14 )); then
+              echo "::error file=${so}::not 16 KB aligned"
+              fail=1
+            fi
+          done < <(find "$output_dir" -name "*.so" -type f)
+          test "$fail" -eq 0
+
+          {
+            echo "source_repository=https://github.com/ffmpegkit-maintained/ffmpeg"
+            echo "source_commit=62b07bf097baf26b416c815aea514e05c9ad6d63"
+            echo "source_version=v8.1.7"
+            echo "android_api=24"
+            echo "android_ndk=27.2.12479018"
+            echo "abi=armeabi-v7a"
+            echo "variant=min"
+            echo
+            sha256sum "$output_dir"/*.so
+          } > "${GITHUB_WORKSPACE}/ffmpeg-armv7-jni/BUILD_METADATA.txt"
+
+      - name: Upload verified ARMv7 JNI libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-kit-8.1.7-min-armeabi-v7a-jni
+          path: ffmpeg-armv7-jni
+          if-no-files-found: error
+          retention-days: 7
