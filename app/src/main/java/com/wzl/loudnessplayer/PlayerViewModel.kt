@@ -133,7 +133,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 val imported = candidates.filter { existingIds.add(it.id) }
 
                 if (imported.isEmpty()) {
-                    showMessage("$sourceName中没有发现新的受支持音频")
+                    showMessage("${sourceName}中没有发现新的受支持音频")
                     return@launch
                 }
 
