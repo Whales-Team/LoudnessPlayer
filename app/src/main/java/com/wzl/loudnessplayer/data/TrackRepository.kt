@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.wzl.loudnessplayer.audio.Normalization
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -34,6 +35,7 @@ class TrackRepository(context: Context) {
                             }.getOrDefault(AudioFileFormat.MP3),
                             loudnessLufs = item.optNullableDouble("loudnessLufs"),
                             samplePeakDbfs = item.optNullableDouble("samplePeakDbfs"),
+                            lyrics = item.optNullableString("lyrics"),
                         ),
                     )
                 }
@@ -54,6 +56,7 @@ class TrackRepository(context: Context) {
                     put("format", track.format.name)
                     put("loudnessLufs", track.loudnessLufs ?: JSONObject.NULL)
                     put("samplePeakDbfs", track.samplePeakDbfs ?: JSONObject.NULL)
+                    put("lyrics", track.lyrics ?: JSONObject.NULL)
                 },
             )
         }
@@ -67,11 +70,116 @@ class TrackRepository(context: Context) {
         preferences.edit().putBoolean(KEY_NORMALIZATION_ENABLED, enabled).apply()
     }
 
+    fun targetLoudnessLufs(): Double =
+        preferences.getString(KEY_TARGET_LOUDNESS_LUFS, null)
+            ?.toDoubleOrNull()
+            ?.coerceIn(Normalization.MIN_TARGET_LUFS, Normalization.MAX_TARGET_LUFS)
+            ?: Normalization.DEFAULT_TARGET_LUFS
+
+    fun setTargetLoudnessLufs(targetLufs: Double) {
+        val safeTarget =
+            targetLufs.coerceIn(Normalization.MIN_TARGET_LUFS, Normalization.MAX_TARGET_LUFS)
+        preferences.edit().putString(KEY_TARGET_LOUDNESS_LUFS, safeTarget.toString()).apply()
+    }
+
     fun isGroupedByArtist(): Boolean =
         preferences.getBoolean(KEY_GROUP_BY_ARTIST, false)
 
     fun setGroupedByArtist(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_GROUP_BY_ARTIST, enabled).apply()
+    }
+
+    fun libraryViewMode(): LibraryViewMode {
+        val saved = preferences.getString(KEY_LIBRARY_VIEW_MODE, null)
+        return runCatching { LibraryViewMode.valueOf(saved.orEmpty()) }.getOrElse {
+            if (isGroupedByArtist()) LibraryViewMode.ARTIST else LibraryViewMode.ALL
+        }
+    }
+
+    fun setLibraryViewMode(mode: LibraryViewMode) {
+        preferences.edit().putString(KEY_LIBRARY_VIEW_MODE, mode.name).apply()
+    }
+
+    fun playbackMode(): PlaybackMode =
+        runCatching {
+            PlaybackMode.valueOf(
+                preferences.getString(KEY_PLAYBACK_MODE, PlaybackMode.SEQUENTIAL.name).orEmpty(),
+            )
+        }.getOrDefault(PlaybackMode.SEQUENTIAL)
+
+    fun setPlaybackMode(mode: PlaybackMode) {
+        preferences.edit().putString(KEY_PLAYBACK_MODE, mode.name).apply()
+    }
+
+    fun appTheme(): AppTheme =
+        runCatching {
+            AppTheme.valueOf(
+                preferences.getString(KEY_APP_THEME, AppTheme.GREEN.name).orEmpty(),
+            )
+        }.getOrDefault(AppTheme.GREEN)
+
+    fun setAppTheme(theme: AppTheme) {
+        preferences.edit().putString(KEY_APP_THEME, theme.name).apply()
+    }
+
+    fun loadMusicFolders(): List<MusicFolder> {
+        val serialized = preferences.getString(KEY_MUSIC_FOLDERS, null) ?: return emptyList()
+        return runCatching {
+            val json = JSONArray(serialized)
+            buildList {
+                for (index in 0 until json.length()) {
+                    val item = json.getJSONObject(index)
+                    val trackIdsJson = item.optJSONArray("trackIds") ?: JSONArray()
+                    val trackIds = buildSet {
+                        for (trackIndex in 0 until trackIdsJson.length()) {
+                            add(trackIdsJson.getString(trackIndex))
+                        }
+                    }
+                    add(
+                        MusicFolder(
+                            id = item.getString("id"),
+                            name = item.optString("name", "未命名文件夹"),
+                            trackIds = trackIds,
+                        ),
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveMusicFolders(folders: List<MusicFolder>) {
+        val json = JSONArray()
+        folders.forEach { folder ->
+            json.put(
+                JSONObject().apply {
+                    put("id", folder.id)
+                    put("name", folder.name)
+                    put("trackIds", JSONArray(folder.trackIds.toList()))
+                },
+            )
+        }
+        preferences.edit().putString(KEY_MUSIC_FOLDERS, json.toString()).apply()
+    }
+
+    fun isLyricsOverlayEnabled(): Boolean =
+        preferences.getBoolean(KEY_LYRICS_OVERLAY_ENABLED, false)
+
+    fun setLyricsOverlayEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_LYRICS_OVERLAY_ENABLED, enabled).apply()
+    }
+
+    fun convertedApeSourceIds(): Set<String> =
+        preferences.getStringSet(KEY_CONVERTED_APE_SOURCE_IDS, emptySet())
+            ?.toSet()
+            .orEmpty()
+
+    fun markApeSourceConverted(trackId: String) {
+        preferences.edit()
+            .putStringSet(
+                KEY_CONVERTED_APE_SOURCE_IDS,
+                convertedApeSourceIds() + trackId,
+            )
+            .apply()
     }
 
     suspend fun createTrack(
@@ -158,6 +266,11 @@ class TrackRepository(context: Context) {
         return optDouble(key).takeUnless(Double::isNaN)
     }
 
+    private fun JSONObject.optNullableString(key: String): String? {
+        if (!has(key) || isNull(key)) return null
+        return optString(key).trim().takeIf(String::isNotEmpty)
+    }
+
     private fun String.sha256(): String {
         val bytes = MessageDigest.getInstance("SHA-256").digest(toByteArray())
         return bytes.joinToString("") { "%02x".format(it) }
@@ -168,6 +281,13 @@ class TrackRepository(context: Context) {
         const val KEY_TRACKS = "tracks"
         const val KEY_NORMALIZATION_ENABLED = "normalization_enabled"
         const val KEY_GROUP_BY_ARTIST = "group_by_artist"
+        const val KEY_TARGET_LOUDNESS_LUFS = "target_loudness_lufs"
+        const val KEY_LIBRARY_VIEW_MODE = "library_view_mode"
+        const val KEY_PLAYBACK_MODE = "playback_mode"
+        const val KEY_APP_THEME = "app_theme"
+        const val KEY_MUSIC_FOLDERS = "music_folders"
+        const val KEY_LYRICS_OVERLAY_ENABLED = "lyrics_overlay_enabled"
+        const val KEY_CONVERTED_APE_SOURCE_IDS = "converted_ape_source_ids"
     }
 }
 

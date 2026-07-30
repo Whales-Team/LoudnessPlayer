@@ -1,51 +1,68 @@
 package com.wzl.loudnessplayer.ui
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import com.wzl.loudnessplayer.data.AppTheme
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF006874),
+    primary = Color(0xFF555F71),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFF9EEFFD),
-    onPrimaryContainer = Color(0xFF001F24),
-    secondary = Color(0xFF4A6267),
-    secondaryContainer = Color(0xFFCDE7EC),
-    surface = Color(0xFFF7FAFA),
-    surfaceVariant = Color(0xFFDBE4E6),
+    primaryContainer = Color(0xFFD9E2F9),
+    onPrimaryContainer = Color(0xFF121C2B),
+    secondary = Color(0xFF5B5F69),
+    secondaryContainer = Color(0xFFE0E2EC),
+    surface = Color(0xFFFAF8FC),
+    surfaceVariant = Color(0xFFE2E2E9),
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF82D3E1),
-    onPrimary = Color(0xFF00363D),
-    primaryContainer = Color(0xFF004F58),
-    onPrimaryContainer = Color(0xFF9EEFFD),
-    secondary = Color(0xFFB1CBD0),
-    secondaryContainer = Color(0xFF334B4F),
-    surface = Color(0xFF0F1415),
-    surfaceVariant = Color(0xFF3F484A),
+    primary = Color(0xFFB8C7E8),
+    onPrimary = Color(0xFF233148),
+    primaryContainer = Color(0xFF394762),
+    onPrimaryContainer = Color(0xFFD9E2F9),
+    secondary = Color(0xFFC5C6D0),
+    secondaryContainer = Color(0xFF44474F),
+    surface = Color(0xFF111318),
+    surfaceVariant = Color(0xFF45464D),
+)
+
+private val GreenColors = lightColorScheme(
+    primary = Color(0xFF446A29),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFC4F1A2),
+    onPrimaryContainer = Color(0xFF0C2000),
+    secondary = Color(0xFF55624C),
+    secondaryContainer = Color(0xFFD8E7CB),
+    tertiary = Color(0xFF386666),
+    surface = Color(0xFFF8FAF2),
+    surfaceVariant = Color(0xFFDFE4D8),
+)
+
+private val BlueColors = lightColorScheme(
+    primary = Color(0xFF0061A4),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFD1E4FF),
+    onPrimaryContainer = Color(0xFF001D36),
+    secondary = Color(0xFF535F70),
+    secondaryContainer = Color(0xFFD7E3F7),
+    tertiary = Color(0xFF6B5778),
+    surface = Color(0xFFF8F9FF),
+    surfaceVariant = Color(0xFFDFE2EB),
 )
 
 @Composable
-fun LoudnessPlayerTheme(content: @Composable () -> Unit) {
-    val darkTheme = isSystemInDarkTheme()
-    val context = LocalContext.current
-    val colors = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && darkTheme ->
-            dynamicDarkColorScheme(context)
-
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            dynamicLightColorScheme(context)
-
-        darkTheme -> DarkColors
-        else -> LightColors
+fun LoudnessPlayerTheme(
+    theme: AppTheme,
+    content: @Composable () -> Unit,
+) {
+    val colors = when (theme) {
+        AppTheme.LIGHT -> LightColors
+        AppTheme.DARK -> DarkColors
+        AppTheme.GREEN -> GreenColors
+        AppTheme.BLUE -> BlueColors
     }
     MaterialTheme(
         colorScheme = colors,
@@ -53,4 +70,3 @@ fun LoudnessPlayerTheme(content: @Composable () -> Unit) {
         content = content,
     )
 }
-

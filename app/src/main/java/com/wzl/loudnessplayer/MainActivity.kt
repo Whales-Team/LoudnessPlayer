@@ -3,8 +3,10 @@ package com.wzl.loudnessplayer
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -18,6 +20,11 @@ import com.wzl.loudnessplayer.ui.LoudnessPlayerApp
 
 class MainActivity : ComponentActivity() {
     private val viewModel: PlayerViewModel by viewModels()
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshLyricsOverlayState()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,6 +66,15 @@ class MainActivity : ComponentActivity() {
                     viewModel.notifyAudioPermissionDenied()
                 }
             }
+            val overlayPermissionPicker = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.StartActivityForResult(),
+            ) {
+                if (Settings.canDrawOverlays(this)) {
+                    viewModel.enableLyricsOverlay()
+                } else {
+                    viewModel.notifyOverlayPermissionDenied()
+                }
+            }
             val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 Manifest.permission.READ_MEDIA_AUDIO
             } else {
@@ -95,7 +111,28 @@ class MainActivity : ComponentActivity() {
                 onNext = viewModel::playNext,
                 onSeek = viewModel::seekTo,
                 onNormalizationChanged = viewModel::setNormalizationEnabled,
-                onGroupedByArtistChanged = viewModel::setGroupedByArtist,
+                onTargetLoudnessChanged = viewModel::setTargetLoudness,
+                onPlaybackModeChanged = viewModel::setPlaybackMode,
+                onLibraryViewModeChanged = viewModel::setLibraryViewMode,
+                onSearchQueryChanged = viewModel::setSearchQuery,
+                onThemeChanged = viewModel::setAppTheme,
+                onLyricsOverlayChanged = { enabled ->
+                    when {
+                        !enabled -> viewModel.disableLyricsOverlay()
+                        Settings.canDrawOverlays(this) -> viewModel.enableLyricsOverlay()
+                        else -> overlayPermissionPicker.launch(
+                            Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName"),
+                            ),
+                        )
+                    }
+                },
+                onCreateMusicFolder = viewModel::createMusicFolder,
+                onSelectMusicFolder = viewModel::selectMusicFolder,
+                onDeleteMusicFolder = viewModel::deleteMusicFolder,
+                onTrackFolderChanged = viewModel::setTrackInMusicFolder,
+                onLyricsChanged = viewModel::setTrackLyrics,
                 onAnalyze = viewModel::analyzeTrack,
                 onRemove = viewModel::removeTrack,
                 onMessageConsumed = viewModel::consumeMessage,

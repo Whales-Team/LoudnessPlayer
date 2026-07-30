@@ -25,5 +25,27 @@ class NormalizationTest {
         assertEquals(0.0, Normalization.gainDb(null, enabled = true), 0.001)
         assertEquals(0.0, Normalization.gainDb(-20.0, enabled = false), 0.001)
     }
-}
 
+    @Test
+    fun supportsUserTargetAndProtectsSamplePeak() {
+        assertEquals(
+            2.0,
+            Normalization.gainDb(
+                loudnessLufs = -20.0,
+                targetLufs = -18.0,
+                enabled = true,
+            ),
+            0.001,
+        )
+        assertEquals(
+            1.0,
+            Normalization.gainDb(
+                loudnessLufs = -20.0,
+                samplePeakDbfs = -2.0,
+                targetLufs = -14.0,
+                enabled = true,
+            ),
+            0.001,
+        )
+    }
+}

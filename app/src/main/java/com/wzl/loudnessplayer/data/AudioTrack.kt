@@ -9,4 +9,5 @@ data class AudioTrack(
     val format: AudioFileFormat = AudioFileFormat.MP3,
     val loudnessLufs: Double? = null,
     val samplePeakDbfs: Double? = null,
+    val lyrics: String? = null,
 )
