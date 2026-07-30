@@ -2,6 +2,7 @@ package com.wzl.loudnessplayer.data
 
 import java.text.Collator
 import java.util.Locale
+import kotlin.math.abs
 
 data class ArtistGroup(
     val artist: String,
@@ -13,6 +14,51 @@ data class SmartTitleGroup(
     val tracks: List<AudioTrack>,
     val matchingFields: List<String> = emptyList(),
 )
+
+data class ImportSelection(
+    val tracks: List<AudioTrack>,
+    val skippedDuplicateCount: Int,
+)
+
+/**
+ * Keeps one representative when the same recording is offered in different formats.
+ *
+ * Existing library entries always win to preserve folder membership and playback state. Within a
+ * new batch, lossless compressed formats are preferred before WAV and MP3.
+ */
+fun selectUniqueImports(
+    existingTracks: List<AudioTrack>,
+    candidates: List<AudioTrack>,
+): ImportSelection {
+    val existingIds = existingTracks.mapTo(mutableSetOf(), AudioTrack::id)
+    val selected = mutableListOf<AudioTrack>()
+    var skippedDuplicateCount = 0
+
+    candidates
+        .distinctBy(AudioTrack::id)
+        .filterNot { it.id in existingIds }
+        .sortedWith(
+            compareByDescending<AudioTrack> { it.format.importPreference }
+                .thenBy { it.title.lowercase(Locale.ROOT) }
+                .thenBy { it.artist.lowercase(Locale.ROOT) },
+        )
+        .forEach { candidate ->
+            val crossFormatDuplicate = (existingTracks + selected).any { accepted ->
+                accepted.format != candidate.format &&
+                    accepted.isSameRecordingAs(candidate)
+            }
+            if (crossFormatDuplicate) {
+                skippedDuplicateCount += 1
+            } else {
+                selected += candidate
+            }
+        }
+
+    return ImportSelection(
+        tracks = selected,
+        skippedDuplicateCount = skippedDuplicateCount,
+    )
+}
 
 fun List<AudioTrack>.sortedByTitleInitial(): List<AudioTrack> {
     val collator = Collator.getInstance(Locale.CHINA).apply {
@@ -135,6 +181,38 @@ private fun union(parent: IntArray, left: Int, right: Int) {
     if (leftRoot != rightRoot) parent[rightRoot] = leftRoot
 }
 
+private fun AudioTrack.isSameRecordingAs(other: AudioTrack): Boolean {
+    if (durationMs <= 0L || other.durationMs <= 0L) return false
+    val normalizedTitle = title.normalizedIdentityField()
+    val normalizedArtist = artist.normalizedIdentityField()
+    if (
+        normalizedTitle.isEmpty() ||
+        normalizedArtist.isEmpty() ||
+        normalizedTitle in UNKNOWN_IDENTITY_FIELDS ||
+        normalizedArtist in UNKNOWN_IDENTITY_FIELDS
+    ) {
+        return false
+    }
+    return normalizedTitle == other.title.normalizedIdentityField() &&
+        normalizedArtist == other.artist.normalizedIdentityField() &&
+        abs(durationMs - other.durationMs) <= DUPLICATE_DURATION_TOLERANCE_MS
+}
+
+private fun String.normalizedIdentityField(): String =
+    lowercase(Locale.ROOT)
+        .replace(IDENTITY_FIELD_PATTERN, "")
+
+private val AudioFileFormat.importPreference: Int
+    get() = when (this) {
+        AudioFileFormat.FLAC -> 4
+        AudioFileFormat.APE -> 3
+        AudioFileFormat.WAV -> 2
+        AudioFileFormat.MP3 -> 1
+    }
+
 private val FIELD_PATTERN = Regex("[\\p{L}\\p{N}]+")
+private val IDENTITY_FIELD_PATTERN = Regex("[^\\p{L}\\p{N}]+")
 private val IGNORED_FIELDS = setOf("feat", "featuring", "version", "music", "audio")
+private val UNKNOWN_IDENTITY_FIELDS = setOf("未知曲目", "未知艺术家", "unknown")
 private const val MAX_FIELDS_PER_TRACK = 12
+private const val DUPLICATE_DURATION_TOLERANCE_MS = 2_000L
