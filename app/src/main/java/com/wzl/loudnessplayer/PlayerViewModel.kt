@@ -593,7 +593,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         val currentId = player.currentMediaItem?.mediaId ?: state.currentTrackId
         val currentPosition = player.currentPosition.coerceAtLeast(0L)
         val startIndex = state.tracks.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
-        val items = state.tracks.map(AudioTrack::toMediaItem)
+        val items = state.tracks.map { it.toMediaItem() }
         if (items.isEmpty()) {
             player.clearMediaItems()
             player.stop()

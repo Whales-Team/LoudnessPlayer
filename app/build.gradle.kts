@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "com.wzl.loudnessplayer"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 36
         versionCode = 3
         versionName = "1.2.0"
@@ -23,6 +23,7 @@ android {
 
     buildTypes {
         debug {
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
