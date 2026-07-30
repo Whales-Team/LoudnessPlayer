@@ -108,7 +108,6 @@ jobs:
             libavfilter.so
             libavformat.so
             libavutil.so
-            libc++_shared.so
             libffmpegkit.so
             libffmpegkit_abidetect.so
             libswresample.so
@@ -123,10 +122,10 @@ jobs:
             fi
           done
 
-          if grep -aF "Monkey's Audio" "$output_dir/libavcodec.so" >/dev/null; then
-            echo "OK: Monkey's Audio decoder marker found"
+          if grep -aF "APE decoder" "$output_dir/libavcodec.so" >/dev/null; then
+            echo "OK: APE decoder marker found"
           else
-            echo "::error::Monkey's Audio decoder marker not found in libavcodec.so"
+            echo "::error::APE decoder marker not found in libavcodec.so"
             fail=1
           fi
           if grep -aF "FLAC" "$output_dir/libavcodec.so" >/dev/null; then
