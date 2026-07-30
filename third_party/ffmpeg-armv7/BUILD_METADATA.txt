@@ -1,0 +1,20 @@
+source_repository=https://github.com/ffmpegkit-maintained/ffmpeg
+source_commit=62b07bf097baf26b416c815aea514e05c9ad6d63
+source_version=v8.1.7
+build_run=https://github.com/Whales-Team/LoudnessPlayer/actions/runs/30530268950
+android_api=24
+android_ndk=27.2.12479018
+abi=armeabi-v7a
+variant=min
+build_command=./android.sh --enable-android-media-codec --enable-android-zlib --api-level=24 --disable-arm-v7a-neon --disable-arm64-v8a --disable-x86 --disable-x86-64
+
+sha256:
+7ec11217480223e28c1ec6c5c16b5fd17db3ebbb03b1c28c6a8ed571ee36926f  libavcodec.so
+0fafdc3130df3396b3039f4cf84031f5857a9bcadf9bf46e9677c37358e7a576  libavdevice.so
+087188cb35cdceacbdd87f5fb28549702b456f8829635f4508b1720f87f3e322  libavfilter.so
+33965e85174906290bc4c5b0f85d8a2a203f76c15e15f71795fc3d5b1f5a2d40  libavformat.so
+8a103553bc94dce242962f3822e4a154bbc5c7a44b569b5cb0d3da25a26703f2  libavutil.so
+cf747d6085091f2a76585f60670c5919fdd60fb67532f0242da7717e252dfb5d  libffmpegkit.so
+ccd06a486328714b56ab1f8256852a5d0d7be7e7f4b5884388e7cf104f401ade  libffmpegkit_abidetect.so
+d52abc8aa9678bcfbee5c98a99509b47aea643e799ef1361fa3006b6e0eb111c  libswresample.so
+0c7adf5f32a1b5967f5b0fc9b5567733447e43db74349fe7e0d755bdfa2ff875  libswscale.so

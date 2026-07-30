@@ -33,9 +33,41 @@ jobs:
       - name: Test, lint, and build debug APK
         run: ./gradlew testDebugUnitTest lintDebug assembleDebug --stacktrace
 
+      - name: Verify packaged FFmpeg ABIs and codecs
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          extract_dir="${RUNNER_TEMP}/loudness-player-apk"
+          unzip -q "$apk" "lib/*" -d "$extract_dir"
+
+          expected=(
+            libavcodec.so
+            libavdevice.so
+            libavfilter.so
+            libavformat.so
+            libavutil.so
+            libffmpegkit.so
+            libffmpegkit_abidetect.so
+            libswresample.so
+            libswscale.so
+          )
+          for abi in arm64-v8a armeabi-v7a; do
+            for library in "${expected[@]}"; do
+              test -f "$extract_dir/lib/$abi/$library"
+            done
+            grep -aF "APE decoder" "$extract_dir/lib/$abi/libavcodec.so" >/dev/null
+            grep -aF "FLAC decoder" "$extract_dir/lib/$abi/libavcodec.so" >/dev/null
+            grep -aF "FLAC encoder" "$extract_dir/lib/$abi/libavcodec.so" >/dev/null
+          done
+
+          if find "$extract_dir/lib" -mindepth 1 -maxdepth 1 -type d \
+            \( -name "x86" -o -name "x86_64" \) | grep -q .; then
+            echo "::error::x86 native libraries must not be packaged"
+            exit 1
+          fi
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: LoudnessPlayer-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-
