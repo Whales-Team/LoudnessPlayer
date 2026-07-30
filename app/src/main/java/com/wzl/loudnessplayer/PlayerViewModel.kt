@@ -13,6 +13,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.wzl.loudnessplayer.audio.LoudnessAnalyzer
 import com.wzl.loudnessplayer.audio.Normalization
+import com.wzl.loudnessplayer.data.AudioFileFormat
+import com.wzl.loudnessplayer.data.AudioLibraryScanner
 import com.wzl.loudnessplayer.data.AudioTrack
 import com.wzl.loudnessplayer.data.TrackRepository
 import kotlinx.coroutines.Job
@@ -26,6 +28,7 @@ import kotlinx.coroutines.launch
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = TrackRepository(application)
+    private val libraryScanner = AudioLibraryScanner(application, repository)
     private val analyzer = LoudnessAnalyzer(application)
     private val player = ExoPlayer.Builder(application).build()
 
@@ -33,6 +36,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         PlayerUiState(
             tracks = repository.loadTracks(),
             normalizationEnabled = repository.isNormalizationEnabled(),
+            groupedByArtist = repository.isGroupedByArtist(),
         ),
     )
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
@@ -55,6 +59,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.update {
                         it.copy(currentTrackId = mediaItem?.mediaId?.takeIf(String::isNotEmpty))
                     }
+                    val current = _uiState.value.tracks.firstOrNull {
+                        it.id == _uiState.value.currentTrackId
+                    }
+                    if (current?.format == AudioFileFormat.APE) {
+                        showMessage("APE 播放取决于当前手机的系统解码器")
+                    }
                     applyNormalization()
                     publishPlaybackState()
                 }
@@ -65,7 +75,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    showMessage("播放失败：${error.errorCodeName}")
+                    val current = _uiState.value.tracks.firstOrNull {
+                        it.id == _uiState.value.currentTrackId
+                    }
+                    if (current?.format == AudioFileFormat.APE) {
+                        showMessage("当前手机不支持 APE 解码；文件仍保留在音乐库中")
+                    } else {
+                        showMessage("播放失败：${error.errorCodeName}")
+                    }
                 }
             },
         )
@@ -75,27 +92,67 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun importTracks(uris: List<Uri>) {
         if (uris.isEmpty()) return
+        importFrom("所选文件") {
+            uris.mapNotNull { uri ->
+                if (!repository.isSupportedAudio(uri)) return@mapNotNull null
+                runCatching { repository.createTrack(uri) }.getOrNull()
+            }
+        }
+    }
+
+    fun importFolder(treeUri: Uri) {
+        importFrom("文件夹") { libraryScanner.scanFolder(treeUri) }
+    }
+
+    fun importDeviceAudio() {
+        importFrom("手机音频库") { libraryScanner.scanDevice() }
+    }
+
+    fun notifyAudioPermissionDenied() {
+        showMessage("需要音频读取权限才能一键扫描手机音乐")
+    }
+
+    fun setGroupedByArtist(enabled: Boolean) {
+        repository.setGroupedByArtist(enabled)
+        _uiState.update { it.copy(groupedByArtist = enabled) }
+    }
+
+    private fun importFrom(
+        sourceName: String,
+        loadTracks: suspend () -> List<AudioTrack>,
+    ) {
+        if (_uiState.value.isImporting) return
         viewModelScope.launch {
-            val existingIds = _uiState.value.tracks.mapTo(mutableSetOf(), AudioTrack::id)
-            val imported = mutableListOf<AudioTrack>()
-            uris.forEach { uri ->
-                runCatching { repository.createTrack(uri) }
-                    .onSuccess { track ->
-                        if (existingIds.add(track.id)) imported += track
-                    }
-                    .onFailure { showMessage("无法导入 ${uri.lastPathSegment ?: "文件"}") }
-            }
+            _uiState.update { it.copy(isImporting = true) }
+            try {
+                val candidates = runCatching { loadTracks() }
+                    .onFailure { showMessage("无法读取$sourceName") }
+                    .getOrDefault(emptyList())
+                val existingIds =
+                    _uiState.value.tracks.mapTo(mutableSetOf(), AudioTrack::id)
+                val imported = candidates.filter { existingIds.add(it.id) }
 
-            if (imported.isEmpty()) {
-                showMessage("没有发现新的 MP3 文件")
-                return@launch
-            }
+                if (imported.isEmpty()) {
+                    showMessage("$sourceName中没有发现新的受支持音频")
+                    return@launch
+                }
 
-            _uiState.update { it.copy(tracks = it.tracks + imported) }
-            persistTracks()
-            syncPlayerQueue(autoPlay = false)
-            showMessage("已导入 ${imported.size} 首歌曲，开始分析响度")
-            analyzeTracks(imported.map(AudioTrack::id))
+                _uiState.update { it.copy(tracks = it.tracks + imported) }
+                persistTracks()
+                syncPlayerQueue(autoPlay = false)
+
+                val analyzable = imported.filter { it.format.supportsLoudnessAnalysis }
+                val apeCount = imported.count { it.format == AudioFileFormat.APE }
+                val suffix = if (apeCount > 0) {
+                    "；$apeCount 首 APE 将由手机系统尝试解码"
+                } else {
+                    ""
+                }
+                showMessage("已导入 ${imported.size} 首音频$suffix")
+                analyzeTracks(analyzable.map(AudioTrack::id))
+            } finally {
+                _uiState.update { it.copy(isImporting = false) }
+            }
         }
     }
 
@@ -146,6 +203,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun analyzeTrack(trackId: String) {
+        val track = _uiState.value.tracks.firstOrNull { it.id == trackId } ?: return
+        if (!track.format.supportsLoudnessAnalysis) {
+            showMessage("APE 暂不支持响度分析")
+            return
+        }
         analyzeTracks(listOf(trackId))
     }
 
@@ -171,6 +233,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             trackIds.forEach { trackId ->
                 val track = _uiState.value.tracks.firstOrNull { it.id == trackId }
                     ?: return@forEach
+                if (!track.format.supportsLoudnessAnalysis) return@forEach
                 _uiState.update { it.copy(analyzingIds = it.analyzingIds + trackId) }
                 runCatching { analyzer.analyze(Uri.parse(track.uri)) }
                     .onSuccess { result ->
@@ -311,7 +374,9 @@ data class PlayerUiState(
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val normalizationEnabled: Boolean = true,
+    val groupedByArtist: Boolean = false,
     val appliedGainDb: Double = 0.0,
     val analyzingIds: Set<String> = emptySet(),
+    val isImporting: Boolean = false,
     val message: String? = null,
 )
