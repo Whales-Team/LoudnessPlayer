@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-@UnstableApi
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = TrackRepository(application)
     private val analyzer = LoudnessAnalyzer(application)
