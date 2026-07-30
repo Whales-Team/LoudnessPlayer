@@ -3,7 +3,7 @@ name: Build ARMv7 FFmpeg JNI
 on:
   workflow_dispatch:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
     paths:
       - ".github/workflows/build-ffmpeg-armv7.yml"
 
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build-armv7:
-    if: github.event_name == 'workflow_dispatch' || github.event.action == 'opened'
+    if: github.event_name == 'workflow_dispatch' || github.event.action == 'opened' || github.event.action == 'synchronize'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
 
@@ -70,13 +70,37 @@ jobs:
       - name: Extract and verify ARMv7 JNI libraries
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           aar="ffmpeg-source/android-8.1-lts/prebuilt/bundle-android-aar/ffmpeg-kit/ffmpeg-kit.aar"
           extract_dir="${RUNNER_TEMP}/ffmpeg-armv7-aar"
           output_dir="${GITHUB_WORKSPACE}/ffmpeg-armv7-jni/armeabi-v7a"
           mkdir -p "$extract_dir" "$output_dir"
+          fail=0
+
+          if [[ ! -f "$aar" ]]; then
+            echo "::error::AAR not found: $aar"
+            exit 1
+          fi
           unzip -q "$aar" -d "$extract_dir"
-          cp "$extract_dir"/jni/armeabi-v7a/*.so "$output_dir"/
+          find "$extract_dir/jni" -maxdepth 2 -type f -name "*.so" -print | sort \
+            | tee "${GITHUB_WORKSPACE}/ffmpeg-armv7-jni/AAR_CONTENTS.txt"
+
+          mapfile -t abi_dirs < <(find "$extract_dir/jni" -mindepth 1 -maxdepth 1 -type d | sort)
+          if [[ "${#abi_dirs[@]}" -ne 1 || "${abi_dirs[0]##*/}" != "armeabi-v7a" ]]; then
+            echo "::error::expected only jni/armeabi-v7a, found: ${abi_dirs[*]:-none}"
+            fail=1
+          else
+            echo "OK: AAR contains only jni/armeabi-v7a"
+          fi
+
+          shopt -s nullglob
+          armv7_libraries=("$extract_dir"/jni/armeabi-v7a/*.so)
+          if [[ "${#armv7_libraries[@]}" -eq 0 ]]; then
+            echo "::error::no armeabi-v7a JNI libraries found"
+            fail=1
+          else
+            cp "${armv7_libraries[@]}" "$output_dir"/
+          fi
 
           expected=(
             libavcodec.so
@@ -91,14 +115,27 @@ jobs:
             libswscale.so
           )
           for library in "${expected[@]}"; do
-            test -f "$output_dir/$library"
+            if [[ -f "$output_dir/$library" ]]; then
+              echo "OK: found $library"
+            else
+              echo "::error::missing expected JNI library: $library"
+              fail=1
+            fi
           done
-          test "$(find "$extract_dir/jni" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1
 
-          strings "$output_dir/libavcodec.so" | grep -F "Monkey's Audio"
-          strings "$output_dir/libavcodec.so" | grep -F "FLAC"
+          if grep -aF "Monkey's Audio" "$output_dir/libavcodec.so" >/dev/null; then
+            echo "OK: Monkey's Audio decoder marker found"
+          else
+            echo "::error::Monkey's Audio decoder marker not found in libavcodec.so"
+            fail=1
+          fi
+          if grep -aF "FLAC" "$output_dir/libavcodec.so" >/dev/null; then
+            echo "OK: FLAC codec marker found"
+          else
+            echo "::error::FLAC codec marker not found in libavcodec.so"
+            fail=1
+          fi
 
-          fail=0
           while IFS= read -r so; do
             min_exp=99
             while IFS= read -r exp; do
@@ -106,12 +143,14 @@ jobs:
               (( exp < min_exp )) && min_exp=$exp
             done < <(objdump -p "$so" | grep -A1 LOAD | grep -oE 'align 2\*\*[0-9]+' | grep -oE '[0-9]+$')
             echo "$so: align=2**${min_exp}"
-            if (( min_exp < 14 )); then
+            if (( min_exp == 99 )); then
+              echo "::error file=${so}::could not read LOAD alignment"
+              fail=1
+            elif (( min_exp < 14 )); then
               echo "::error file=${so}::not 16 KB aligned"
               fail=1
             fi
           done < <(find "$output_dir" -name "*.so" -type f)
-          test "$fail" -eq 0
 
           {
             echo "source_repository=https://github.com/ffmpegkit-maintained/ffmpeg"
@@ -122,13 +161,19 @@ jobs:
             echo "abi=armeabi-v7a"
             echo "variant=min"
             echo
-            sha256sum "$output_dir"/*.so
+            if [[ "${#armv7_libraries[@]}" -gt 0 ]]; then
+              sha256sum "$output_dir"/*.so
+            else
+              echo "no JNI libraries available for hashing"
+            fi
           } > "${GITHUB_WORKSPACE}/ffmpeg-armv7-jni/BUILD_METADATA.txt"
+          exit "$fail"
 
       - name: Upload verified ARMv7 JNI libraries
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-kit-8.1.7-min-armeabi-v7a-jni
           path: ffmpeg-armv7-jni
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
