@@ -23,36 +23,29 @@ class ApeLoudnessAnalyzer(context: Context) {
                 uri.path ?: uri.toString()
             }
             val session = FFmpegKit.executeWithArgumentsAsync(
-                arrayOf(
-                    "-nostdin",
-                    "-hide_banner",
-                    "-nostats",
-                    "-loglevel",
-                    "info",
-                    "-i",
-                    input,
-                    "-map",
-                    "0:a:0",
-                    "-vn",
-                    "-sn",
-                    "-dn",
-                    "-af",
-                    "ebur128=peak=true",
-                    "-f",
-                    "null",
-                    "-",
-                ),
+                ApeFfmpegCommands.analyze(input),
             ) { completedSession ->
                 if (!continuation.isActive) return@executeWithArgumentsAsync
-                val result = completedSession.allLogsAsString
+                val logs = completedSession.allLogsAsString
+                val result = logs
                     .takeIf { ReturnCode.isSuccess(completedSession.returnCode) }
                     ?.let(::parseFfmpegLoudnessSummary)
-                if (result == null) {
-                    continuation.resumeWithException(
-                        IllegalStateException("APE 响度分析失败"),
-                    )
-                } else {
-                    continuation.resume(result)
+                when {
+                    !ReturnCode.isSuccess(completedSession.returnCode) -> {
+                        continuation.resumeWithException(
+                            IllegalStateException(
+                                "APE 响度解码失败：${logs.analysisFailureDetail()}",
+                            ),
+                        )
+                    }
+
+                    result == null -> {
+                        continuation.resumeWithException(
+                            IllegalStateException("APE 响度结果无法解析"),
+                        )
+                    }
+
+                    else -> continuation.resume(result)
                 }
             }
             continuation.invokeOnCancellation {
@@ -65,13 +58,15 @@ internal fun parseFfmpegLoudnessSummary(logOutput: String): R128Meter.LoudnessRe
     val summary = logOutput.substringAfterLast("Summary:", missingDelimiterValue = "")
     if (summary.isEmpty()) return null
 
-    val integrated = INTEGRATED_LOUDNESS_PATTERN.find(summary)
+    val integrated = INTEGRATED_LOUDNESS_PATTERN.findAll(summary)
+        .lastOrNull()
         ?.groupValues
         ?.get(1)
         ?.toFfmpegDouble()
         ?.takeIf(Double::isFinite)
         ?: return null
-    val peak = TRUE_PEAK_PATTERN.find(summary)
+    val peak = SAMPLE_PEAK_PATTERN.findAll(summary)
+        .lastOrNull()
         ?.groupValues
         ?.get(1)
         ?.toFfmpegDouble()
@@ -89,7 +84,15 @@ private fun String.toFfmpegDouble(): Double? = when (lowercase()) {
 }
 
 private val INTEGRATED_LOUDNESS_PATTERN =
-    Regex("""(?m)^\s*I:\s*([-+]?(?:\d+(?:\.\d+)?|inf))\s+LUFS\s*$""", RegexOption.IGNORE_CASE)
+    Regex("""\bI:\s*([-+]?(?:\d+(?:\.\d+)?|inf))\s+LUFS\b""", RegexOption.IGNORE_CASE)
 
-private val TRUE_PEAK_PATTERN =
-    Regex("""(?m)^\s*Peak:\s*([-+]?(?:\d+(?:\.\d+)?|inf))\s+dBFS\s*$""", RegexOption.IGNORE_CASE)
+private val SAMPLE_PEAK_PATTERN =
+    Regex("""\bPeak:\s*([-+]?(?:\d+(?:\.\d+)?|inf))\s+dBFS\b""", RegexOption.IGNORE_CASE)
+
+private fun String.analysisFailureDetail(): String =
+    lineSequence()
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .lastOrNull()
+        ?.take(120)
+        ?: "FFmpeg 未返回错误信息"

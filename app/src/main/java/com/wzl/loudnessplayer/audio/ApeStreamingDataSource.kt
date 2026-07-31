@@ -15,7 +15,6 @@ import com.arthenica.ffmpegkit.ReturnCode
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
-import java.util.Locale
 
 /**
  * Streams APE through FFmpeg into ExoPlayer as PCM WAV without creating a converted audio file.
@@ -36,7 +35,10 @@ class ApeStreamingDataSource private constructor(
     private var inputStream: FileInputStream? = null
     private var ffmpegSession: FFmpegSession? = null
     private var opened = false
+    @Volatile
     private var receivedAudio = false
+
+    @Volatile
     private var decodingFailure: IOException? = null
 
     override fun open(dataSpec: DataSpec): Long {
@@ -60,8 +62,8 @@ class ApeStreamingDataSource private constructor(
             )
             inputStream = FileInputStream(registeredPipe)
             ffmpegSession = FFmpegKit.executeWithArgumentsAsync(
-                ffmpegArguments(
-                    sourceUri = sourceUri,
+                ApeFfmpegCommands.stream(
+                    input = ffmpegInput(sourceUri),
                     outputPipe = registeredPipe,
                     requestedBytePosition = dataSpec.position,
                 ),
@@ -120,7 +122,13 @@ class ApeStreamingDataSource private constructor(
 
     private fun onFfmpegCompleted(session: FFmpegSession) {
         if (!ReturnCode.isSuccess(session.returnCode) && currentUri != null) {
-            decodingFailure = IOException("APE 实时解码失败")
+            val detail = session.allLogsAsString.failureDetail()
+            decodingFailure = IOException(
+                buildString {
+                    append("APE 实时解码失败")
+                    if (detail != null) append("：$detail")
+                },
+            )
             if (!receivedAudio) {
                 synchronized(resourceLock) {
                     runCatching { inputStream?.close() }
@@ -151,46 +159,12 @@ class ApeStreamingDataSource private constructor(
         }
     }
 
-    private fun ffmpegArguments(
-        sourceUri: Uri,
-        outputPipe: String,
-        requestedBytePosition: Long,
-    ): Array<String> {
-        val input = if (sourceUri.scheme.equals("content", ignoreCase = true)) {
+    private fun ffmpegInput(sourceUri: Uri): String =
+        if (sourceUri.scheme.equals("content", ignoreCase = true)) {
             FFmpegKitConfig.getSafParameterForRead(appContext, sourceUri)
         } else {
             sourceUri.path ?: sourceUri.toString()
         }
-        val seekSeconds = requestedBytePosition
-            .coerceAtLeast(0L)
-            .toDouble() / PCM_BYTES_PER_SECOND
-        return buildList {
-            addAll(listOf("-nostdin", "-hide_banner", "-loglevel", "error"))
-            if (seekSeconds > 0.0) {
-                addAll(listOf("-ss", String.format(Locale.US, "%.3f", seekSeconds)))
-            }
-            addAll(
-                listOf(
-                    "-i",
-                    input,
-                    "-map",
-                    "0:a:0",
-                    "-vn",
-                    "-sn",
-                    "-dn",
-                    "-ac",
-                    OUTPUT_CHANNELS.toString(),
-                    "-ar",
-                    OUTPUT_SAMPLE_RATE_HZ.toString(),
-                    "-c:a",
-                    "pcm_s16le",
-                    "-f",
-                    if (requestedBytePosition == 0L) "wav" else "s16le",
-                    outputPipe,
-                ),
-            )
-        }.toTypedArray()
-    }
 
     class Factory(
         context: Context,
@@ -203,11 +177,6 @@ class ApeStreamingDataSource private constructor(
     companion object {
         private const val STREAM_SCHEME = "loudness-ape"
         private const val SOURCE_PARAMETER = "source"
-        private const val OUTPUT_SAMPLE_RATE_HZ = 48_000
-        private const val OUTPUT_CHANNELS = 2
-        private const val PCM_BYTES_PER_SAMPLE = 2
-        private const val PCM_BYTES_PER_SECOND =
-            OUTPUT_SAMPLE_RATE_HZ * OUTPUT_CHANNELS * PCM_BYTES_PER_SAMPLE
 
         fun streamingUri(sourceUri: String): Uri = Uri.Builder()
             .scheme(STREAM_SCHEME)
@@ -223,3 +192,10 @@ class ApeStreamingDataSource private constructor(
         }
     }
 }
+
+private fun String.failureDetail(): String? =
+    lineSequence()
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .lastOrNull()
+        ?.take(160)

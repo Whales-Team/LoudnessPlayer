@@ -217,7 +217,7 @@ fun LoudnessPlayerApp(
                             Column {
                                 Text("响度播放器", fontWeight = FontWeight.SemiBold)
                                 Text(
-                                    "v1.3 · APE 实时播放 · 智能去重",
+                                    "v1.3.1 · APE 播放修复 · 智能去重",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
