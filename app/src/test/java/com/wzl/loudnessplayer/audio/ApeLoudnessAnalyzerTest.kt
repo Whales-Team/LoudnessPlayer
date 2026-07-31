@@ -1,0 +1,43 @@
+package com.wzl.loudnessplayer.audio
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class ApeLoudnessAnalyzerTest {
+    @Test
+    fun parsesOnlyTheFinalEbur128Summary() {
+        val output = """
+            [Parsed_ebur128_0] t: 1.0 I: -45.0 LUFS
+            [Parsed_ebur128_0] Summary:
+
+              Integrated loudness:
+                I:         -14.2 LUFS
+                Threshold: -24.5 LUFS
+
+              True peak:
+                Peak:       -0.7 dBFS
+        """.trimIndent()
+
+        val result = parseFfmpegLoudnessSummary(output)
+
+        assertEquals(-14.2, result?.integratedLufs ?: 0.0, 0.001)
+        assertEquals(-0.7, result?.samplePeakDbfs ?: 0.0, 0.001)
+    }
+
+    @Test
+    fun rejectsOutputWithoutACompleteSummary() {
+        assertNull(parseFfmpegLoudnessSummary("I: -14.2 LUFS"))
+        assertNull(
+            parseFfmpegLoudnessSummary(
+                """
+                    Summary:
+                      Integrated loudness:
+                        I: -inf LUFS
+                      True peak:
+                        Peak: -inf dBFS
+                """.trimIndent(),
+            ),
+        )
+    }
+}

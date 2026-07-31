@@ -168,20 +168,6 @@ class TrackRepository(context: Context) {
         preferences.edit().putBoolean(KEY_LYRICS_OVERLAY_ENABLED, enabled).apply()
     }
 
-    fun convertedApeSourceIds(): Set<String> =
-        preferences.getStringSet(KEY_CONVERTED_APE_SOURCE_IDS, emptySet())
-            ?.toSet()
-            .orEmpty()
-
-    fun markApeSourceConverted(trackId: String) {
-        preferences.edit()
-            .putStringSet(
-                KEY_CONVERTED_APE_SOURCE_IDS,
-                convertedApeSourceIds() + trackId,
-            )
-            .apply()
-    }
-
     suspend fun createTrack(
         uri: Uri,
         hint: AudioMetadataHint? = null,
@@ -287,7 +273,6 @@ class TrackRepository(context: Context) {
         const val KEY_APP_THEME = "app_theme"
         const val KEY_MUSIC_FOLDERS = "music_folders"
         const val KEY_LYRICS_OVERLAY_ENABLED = "lyrics_overlay_enabled"
-        const val KEY_CONVERTED_APE_SOURCE_IDS = "converted_ape_source_ids"
     }
 }
 

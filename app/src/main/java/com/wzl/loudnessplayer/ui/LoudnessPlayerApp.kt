@@ -10,12 +10,16 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Pause
@@ -38,6 +43,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
@@ -54,6 +60,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
@@ -62,6 +69,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -72,12 +81,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -104,6 +115,7 @@ import com.wzl.loudnessplayer.data.matchingSearch
 import com.wzl.loudnessplayer.data.sortedByTitleInitial
 import java.util.Locale
 import kotlin.math.roundToLong
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,7 +136,7 @@ fun LoudnessPlayerApp(
     onSearchQueryChanged: (String) -> Unit,
     onThemeChanged: (AppTheme) -> Unit,
     onLyricsOverlayChanged: (Boolean) -> Unit,
-    onCreateMusicFolder: (String) -> Unit,
+    onCreateMusicFolder: (String) -> String?,
     onSelectMusicFolder: (String?) -> Unit,
     onDeleteMusicFolder: (String) -> Unit,
     onTrackFolderChanged: (String, String, Boolean) -> Unit,
@@ -135,12 +147,13 @@ fun LoudnessPlayerApp(
 ) {
     LoudnessPlayerTheme(theme = state.appTheme) {
         val snackbarHostState = remember { SnackbarHostState() }
-        var importMenuExpanded by remember { mutableStateOf(false) }
-        var themeDialogVisible by remember { mutableStateOf(false) }
+        val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+        val coroutineScope = rememberCoroutineScope()
         var targetDialogVisible by remember { mutableStateOf(false) }
         var folderDialogVisible by remember { mutableStateOf(false) }
         var lyricsTrack by remember { mutableStateOf<AudioTrack?>(null) }
         var folderTrack by remember { mutableStateOf<AudioTrack?>(null) }
+        var bulkFolderId by remember { mutableStateOf<String?>(null) }
 
         val selectedFolder = state.musicFolders.firstOrNull {
             it.id == state.selectedFolderId
@@ -161,109 +174,81 @@ fun LoudnessPlayerApp(
             }
         }
 
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text("响度播放器", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "v1.2 · 自动响度 · 桌面歌词",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    },
-                    actions = {
-                        IconButton(
-                            onClick = {
-                                onLyricsOverlayChanged(!state.lyricsOverlayEnabled)
-                            },
-                        ) {
-                            Icon(
-                                Icons.Default.Subtitles,
-                                contentDescription = if (state.lyricsOverlayEnabled) {
-                                    "关闭桌面歌词"
-                                } else {
-                                    "开启桌面歌词"
-                                },
-                                tint = if (state.lyricsOverlayEnabled) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
-                        }
-                        IconButton(onClick = { themeDialogVisible = true }) {
-                            Icon(Icons.Default.Palette, contentDescription = "界面主题")
-                        }
-                        Box {
-                            IconButton(
-                                onClick = { importMenuExpanded = true },
-                                enabled = !state.isImporting,
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = "导入音乐")
-                            }
-                            ImportMenu(
-                                expanded = importMenuExpanded,
-                                onDismiss = { importMenuExpanded = false },
-                                onImportFiles = onImportFiles,
-                                onImportFolder = onImportFolder,
-                                onScanDevice = onScanDevice,
-                            )
-                        }
-                    },
-                )
-            },
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            bottomBar = {
-                NowPlayingBar(
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            gesturesEnabled = true,
+            drawerContent = {
+                SettingsDrawer(
                     state = state,
-                    onPlayPause = onPlayPause,
-                    onPrevious = onPrevious,
-                    onNext = onNext,
-                    onSeek = onSeek,
-                    onPlaybackModeChanged = onPlaybackModeChanged,
+                    onClose = { coroutineScope.launch { drawerState.close() } },
+                    onConfigureLoudness = {
+                        coroutineScope.launch { drawerState.close() }
+                        targetDialogVisible = true
+                    },
+                    onNormalizationChanged = onNormalizationChanged,
+                    onImportFiles = {
+                        coroutineScope.launch { drawerState.close() }
+                        onImportFiles()
+                    },
+                    onImportFolder = {
+                        coroutineScope.launch { drawerState.close() }
+                        onImportFolder()
+                    },
+                    onScanDevice = {
+                        coroutineScope.launch { drawerState.close() }
+                        onScanDevice()
+                    },
+                    onThemeChanged = onThemeChanged,
+                    onLyricsOverlayChanged = onLyricsOverlayChanged,
                 )
             },
-        ) { paddingValues ->
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    top = 8.dp,
-                    end = 16.dp,
-                    bottom = 18.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                item {
-                    NormalizationCard(
-                        enabled = state.normalizationEnabled,
-                        targetLoudnessLufs = state.targetLoudnessLufs,
-                        appliedGainDb = state.appliedGainDb,
-                        analyzedCount = state.tracks.count { it.loudnessLufs != null },
-                        totalCount = state.tracks.count {
-                            it.format.supportsLoudnessAnalysis
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        navigationIcon = {
+                            IconButton(
+                                onClick = { coroutineScope.launch { drawerState.open() } },
+                            ) {
+                                Icon(Icons.Default.Menu, contentDescription = "打开功能菜单")
+                            }
                         },
-                        analyzingCount = state.analyzingIds.size,
-                        convertingCount = state.convertingIds.size,
-                        onEnabledChanged = onNormalizationChanged,
-                        onConfigure = { targetDialogVisible = true },
+                        title = {
+                            Column {
+                                Text("响度播放器", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "v1.3 · APE 实时播放 · 智能去重",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        },
                     )
-                }
-
-                item {
-                    ImportActionsCard(
-                        isImporting = state.isImporting,
-                        onImportFiles = onImportFiles,
-                        onImportFolder = onImportFolder,
-                        onScanDevice = onScanDevice,
+                },
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+                bottomBar = {
+                    NowPlayingBar(
+                        state = state,
+                        onPlayPause = onPlayPause,
+                        onPrevious = onPrevious,
+                        onNext = onNext,
+                        onSeek = onSeek,
+                        onPlaybackModeChanged = onPlaybackModeChanged,
                     )
-                }
-
+                },
+            ) { paddingValues ->
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        top = 8.dp,
+                        end = 16.dp,
+                        bottom = 18.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                 item {
                     LibraryControls(
                         state = state,
@@ -273,6 +258,9 @@ fun LoudnessPlayerApp(
                         onLibraryViewModeChanged = onLibraryViewModeChanged,
                         onSelectMusicFolder = onSelectMusicFolder,
                         onCreateFolder = { folderDialogVisible = true },
+                        onManageSelectedFolder = {
+                            selectedFolder?.let { bulkFolderId = it.id }
+                        },
                         onDeleteSelectedFolder = {
                             selectedFolder?.let { onDeleteMusicFolder(it.id) }
                         },
@@ -301,7 +289,6 @@ fun LoudnessPlayerApp(
                                     track = track,
                                     selected = track.id == state.currentTrackId,
                                     analyzing = track.id in state.analyzingIds,
-                                    converting = track.id in state.convertingIds,
                                     onClick = { onTrackClick(track.id) },
                                     onAnalyze = { onAnalyze(track.id) },
                                     onEditLyrics = { lyricsTrack = track },
@@ -328,7 +315,6 @@ fun LoudnessPlayerApp(
                                         track = track,
                                         selected = track.id == state.currentTrackId,
                                         analyzing = track.id in state.analyzingIds,
-                                        converting = track.id in state.convertingIds,
                                         onClick = { onTrackClick(track.id) },
                                         onAnalyze = { onAnalyze(track.id) },
                                         onEditLyrics = { lyricsTrack = track },
@@ -356,7 +342,6 @@ fun LoudnessPlayerApp(
                                         track = track,
                                         selected = track.id == state.currentTrackId,
                                         analyzing = track.id in state.analyzingIds,
-                                        converting = track.id in state.convertingIds,
                                         onClick = { onTrackClick(track.id) },
                                         onAnalyze = { onAnalyze(track.id) },
                                         onEditLyrics = { lyricsTrack = track },
@@ -370,6 +355,7 @@ fun LoudnessPlayerApp(
                 }
             }
         }
+        }
 
         if (targetDialogVisible) {
             TargetLoudnessDialog(
@@ -381,22 +367,14 @@ fun LoudnessPlayerApp(
                 },
             )
         }
-        if (themeDialogVisible) {
-            ThemeDialog(
-                selectedTheme = state.appTheme,
-                onDismiss = { themeDialogVisible = false },
-                onThemeSelected = {
-                    onThemeChanged(it)
-                    themeDialogVisible = false
-                },
-            )
-        }
         if (folderDialogVisible) {
             CreateFolderDialog(
                 onDismiss = { folderDialogVisible = false },
                 onConfirm = {
-                    onCreateMusicFolder(it)
-                    folderDialogVisible = false
+                    onCreateMusicFolder(it)?.let { newFolderId ->
+                        bulkFolderId = newFolderId
+                        folderDialogVisible = false
+                    }
                 },
             )
         }
@@ -424,45 +402,157 @@ fun LoudnessPlayerApp(
                 },
             )
         }
+        bulkFolderId?.let { folderId ->
+            state.musicFolders.firstOrNull { it.id == folderId }?.let { folder ->
+                FolderTrackPickerDialog(
+                    folder = folder,
+                    tracks = state.tracks,
+                    onDismiss = { bulkFolderId = null },
+                    onMembershipChanged = { trackId, included ->
+                        onTrackFolderChanged(trackId, folder.id, included)
+                    },
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun ImportMenu(
-    expanded: Boolean,
-    onDismiss: () -> Unit,
+private fun SettingsDrawer(
+    state: PlayerUiState,
+    onClose: () -> Unit,
+    onConfigureLoudness: () -> Unit,
+    onNormalizationChanged: (Boolean) -> Unit,
     onImportFiles: () -> Unit,
     onImportFolder: () -> Unit,
     onScanDevice: () -> Unit,
+    onThemeChanged: (AppTheme) -> Unit,
+    onLyricsOverlayChanged: (Boolean) -> Unit,
 ) {
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismiss,
+    ModalDrawerSheet(
+        modifier = Modifier
+            .fillMaxHeight()
+            .widthIn(max = 360.dp),
     ) {
-        DropdownMenuItem(
-            text = { Text("选择音频文件") },
-            leadingIcon = { Icon(Icons.Default.Add, null) },
-            onClick = {
-                onDismiss()
-                onImportFiles()
-            },
-        )
-        DropdownMenuItem(
-            text = { Text("导入整个文件夹") },
-            leadingIcon = { Icon(Icons.Default.Folder, null) },
-            onClick = {
-                onDismiss()
-                onImportFolder()
-            },
-        )
-        DropdownMenuItem(
-            text = { Text("一键扫描手机音频") },
-            leadingIcon = { Icon(Icons.Default.PhoneAndroid, null) },
-            onClick = {
-                onDismiss()
-                onScanDevice()
-            },
-        )
+        Column(
+            modifier = Modifier
+                .statusBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Default.Menu, contentDescription = "关闭功能菜单")
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "功能与设置",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "也可从屏幕左边缘向右滑打开",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Text(
+                "播放响度",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            NormalizationCard(
+                enabled = state.normalizationEnabled,
+                targetLoudnessLufs = state.targetLoudnessLufs,
+                appliedGainDb = state.appliedGainDb,
+                analyzedCount = state.tracks.count { it.loudnessLufs != null },
+                totalCount = state.tracks.count { it.format.supportsLoudnessAnalysis },
+                analyzingCount = state.analyzingIds.size,
+                onEnabledChanged = onNormalizationChanged,
+                onConfigure = onConfigureLoudness,
+            )
+
+            Text(
+                "导入音乐",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            ImportActionsCard(
+                isImporting = state.isImporting,
+                onImportFiles = onImportFiles,
+                onImportFolder = onImportFolder,
+                onScanDevice = onScanDevice,
+            )
+
+            HorizontalDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        onLyricsOverlayChanged(!state.lyricsOverlayEnabled)
+                    }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Subtitles,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("桌面歌词", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "在其他应用或桌面上显示当前歌词",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = state.lyricsOverlayEnabled,
+                    onCheckedChange = onLyricsOverlayChanged,
+                )
+            }
+
+            HorizontalDivider()
+            Text(
+                "界面主题",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            AppTheme.entries.forEach { theme ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onThemeChanged(theme) }
+                        .background(
+                            if (theme == state.appTheme) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                Color.Transparent
+                            },
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = theme == state.appTheme,
+                        onClick = { onThemeChanged(theme) },
+                    )
+                    Icon(Icons.Default.Palette, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(theme.displayName)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
     }
 }
 
@@ -530,7 +620,6 @@ private fun NormalizationCard(
     analyzedCount: Int,
     totalCount: Int,
     analyzingCount: Int,
-    convertingCount: Int,
     onEnabledChanged: (Boolean) -> Unit,
     onConfigure: () -> Unit,
 ) {
@@ -572,12 +661,9 @@ private fun NormalizationCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
                 )
-                if (analyzingCount > 0 || convertingCount > 0) {
+                if (analyzingCount > 0) {
                     Text(
-                        listOfNotNull(
-                            analyzingCount.takeIf { it > 0 }?.let { "响度校验 $it 首" },
-                            convertingCount.takeIf { it > 0 }?.let { "APE 转 FLAC $it 首" },
-                        ).joinToString(" · "),
+                        "响度校验 $analyzingCount 首",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -609,6 +695,7 @@ private fun LibraryControls(
     onLibraryViewModeChanged: (LibraryViewMode) -> Unit,
     onSelectMusicFolder: (String?) -> Unit,
     onCreateFolder: () -> Unit,
+    onManageSelectedFolder: () -> Unit,
     onDeleteSelectedFolder: () -> Unit,
 ) {
     var viewMenuExpanded by remember { mutableStateOf(false) }
@@ -732,14 +819,27 @@ private fun LibraryControls(
                 }
             }
             if (selectedFolder != null) {
-                TextButton(
-                    onClick = onDeleteSelectedFolder,
-                    modifier = Modifier.align(Alignment.End),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Default.DeleteOutline, contentDescription = null)
-                    Spacer(Modifier.width(5.dp))
-                    Text("删除当前文件夹（不删除歌曲）")
+                    FilledTonalButton(onClick = onManageSelectedFolder) {
+                        Icon(Icons.Default.PlaylistAdd, contentDescription = null)
+                        Spacer(Modifier.width(5.dp))
+                        Text("管理已有歌曲")
+                    }
+                    TextButton(onClick = onDeleteSelectedFolder) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = null)
+                        Spacer(Modifier.width(5.dp))
+                        Text("删除文件夹")
+                    }
                 }
+                Text(
+                    "删除文件夹不会删除音乐库中的歌曲。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -782,7 +882,6 @@ private fun TrackRow(
     track: AudioTrack,
     selected: Boolean,
     analyzing: Boolean,
-    converting: Boolean,
     onClick: () -> Unit,
     onAnalyze: () -> Unit,
     onEditLyrics: () -> Unit,
@@ -845,7 +944,7 @@ private fun TrackRow(
                 )
             }
             FormatBadge(track.format)
-            if (analyzing || converting) {
+            if (analyzing) {
                 Column(
                     modifier = Modifier.padding(horizontal = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -855,7 +954,7 @@ private fun TrackRow(
                         strokeWidth = 2.dp,
                     )
                     Text(
-                        if (converting) "转 FLAC" else "校验",
+                        "校验",
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
@@ -892,12 +991,12 @@ private fun TrackRow(
                                 if (track.format.supportsLoudnessAnalysis) {
                                     "重新分析响度"
                                 } else {
-                                    "APE 正在等待转换"
+                                    "APE 实时解码播放（不生成副本）"
                                 },
                             )
                         },
                         leadingIcon = { Icon(Icons.Default.BarChart, null) },
-                        enabled = track.format.supportsLoudnessAnalysis && !converting,
+                        enabled = track.format.supportsLoudnessAnalysis,
                         onClick = {
                             menuExpanded = false
                             onAnalyze()
@@ -979,7 +1078,7 @@ private fun EmptyLibrary(
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            "支持 MP3、FLAC、WAV；APE 会自动转为 FLAC",
+            "支持 MP3、FLAC、WAV、APE；APE 直接实时播放，不生成副本",
             modifier = Modifier.padding(top = 4.dp, bottom = 18.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1164,41 +1263,6 @@ private fun TargetLoudnessDialog(
 }
 
 @Composable
-private fun ThemeDialog(
-    selectedTheme: AppTheme,
-    onDismiss: () -> Unit,
-    onThemeSelected: (AppTheme) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.Palette, contentDescription = null) },
-        title = { Text("选择界面主题") },
-        text = {
-            Column {
-                AppTheme.entries.forEach { theme ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onThemeSelected(theme) }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(
-                            selected = theme == selectedTheme,
-                            onClick = { onThemeSelected(theme) },
-                        )
-                        Text(theme.displayName)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        },
-    )
-}
-
-@Composable
 private fun CreateFolderDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
@@ -1318,6 +1382,74 @@ private fun FolderMembershipDialog(
         },
         dismissButton = {
             TextButton(onClick = onCreateFolder) { Text("新建文件夹") }
+        },
+    )
+}
+
+@Composable
+private fun FolderTrackPickerDialog(
+    folder: MusicFolder,
+    tracks: List<AudioTrack>,
+    onDismiss: () -> Unit,
+    onMembershipChanged: (String, Boolean) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
+        title = { Text("管理“${folder.name}”中的歌曲") },
+        text = {
+            if (tracks.isEmpty()) {
+                Text("音乐库中还没有可加入的歌曲。")
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    items(
+                        items = tracks.sortedByTitleInitial(),
+                        key = AudioTrack::id,
+                    ) { track ->
+                        val included = track.id in folder.trackIds
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    onMembershipChanged(track.id, !included)
+                                }
+                                .padding(vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = included,
+                                onCheckedChange = {
+                                    onMembershipChanged(track.id, it)
+                                },
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    track.title,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    track.artist,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            FormatBadge(track.format)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("完成") }
         },
     )
 }

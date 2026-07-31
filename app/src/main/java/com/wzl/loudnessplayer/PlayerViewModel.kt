@@ -11,8 +11,11 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import com.wzl.loudnessplayer.audio.ApeToFlacConverter
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.wzl.loudnessplayer.audio.ApeLoudnessAnalyzer
+import com.wzl.loudnessplayer.audio.ApeStreamingDataSource
 import com.wzl.loudnessplayer.audio.LoudnessAnalyzer
 import com.wzl.loudnessplayer.audio.Normalization
 import com.wzl.loudnessplayer.data.AppTheme
@@ -23,6 +26,7 @@ import com.wzl.loudnessplayer.data.LibraryViewMode
 import com.wzl.loudnessplayer.data.MusicFolder
 import com.wzl.loudnessplayer.data.PlaybackMode
 import com.wzl.loudnessplayer.data.TrackRepository
+import com.wzl.loudnessplayer.data.selectUniqueImports
 import com.wzl.loudnessplayer.data.sortedByTitleInitial
 import com.wzl.loudnessplayer.lyrics.LrcParser
 import com.wzl.loudnessplayer.lyrics.LyricsOverlayService
@@ -42,8 +46,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val repository = TrackRepository(application)
     private val libraryScanner = AudioLibraryScanner(application, repository)
     private val analyzer = LoudnessAnalyzer(application)
-    private val apeConverter = ApeToFlacConverter(application, repository)
-    private val player = ExoPlayer.Builder(application).build()
+    private val apeAnalyzer = ApeLoudnessAnalyzer(application)
+    private val playbackDataSourceFactory = DefaultDataSource.Factory(
+        application,
+        ApeStreamingDataSource.Factory(application),
+    )
+    private val player = ExoPlayer.Builder(application)
+        .setMediaSourceFactory(DefaultMediaSourceFactory(playbackDataSourceFactory))
+        .build()
 
     private val _uiState = MutableStateFlow(
         PlayerUiState(
@@ -61,10 +71,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
     private val pendingAnalysisIds = linkedSetOf<String>()
-    private val pendingApeConversionIds = linkedSetOf<String>()
     private var loudnessEnhancer: LoudnessEnhancer? = null
     private var analysisJob: Job? = null
-    private var apeConversionJob: Job? = null
     private var volumeRampJob: Job? = null
     private var cachedLyricsTrackId: String? = null
     private var cachedTimedLyrics: List<TimedLyricLine> = emptyList()
@@ -86,10 +94,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         it.copy(currentTrackId = mediaItem?.mediaId?.takeIf(String::isNotEmpty))
                     }
                     cachedLyricsTrackId = null
-                    val current = currentTrack()
-                    if (current?.format == AudioFileFormat.APE) {
-                        showMessage("APE 播放取决于当前手机的系统解码器")
-                    }
                     applyNormalization(smooth = true)
                     publishPlaybackState()
                     updateLyricsOverlay(force = true)
@@ -103,7 +107,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     val current = currentTrack()
                     if (current?.format == AudioFileFormat.APE) {
-                        showMessage("当前手机不支持 APE 解码；文件仍保留在音乐库中")
+                        showMessage("APE 实时解码失败；原文件未被修改")
                     } else {
                         showMessage("播放失败：${error.errorCodeName}")
                     }
@@ -119,7 +123,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         if (_uiState.value.normalizationEnabled) {
             queueMissingLoudnessAnalysis()
         }
-        queueApeConversions(_uiState.value.tracks.map(AudioTrack::id))
     }
 
     fun importTracks(uris: List<Uri>) {
@@ -152,19 +155,22 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.update { it.copy(isImporting = true) }
             try {
-                val convertedApeIds = repository.convertedApeSourceIds()
                 val candidates = runCatching { loadTracks() }
                     .onFailure { showMessage("无法读取$sourceName") }
                     .getOrDefault(emptyList())
-                    .filterNot {
-                        it.format == AudioFileFormat.APE && it.id in convertedApeIds
-                    }
-                val existingIds =
-                    _uiState.value.tracks.mapTo(mutableSetOf(), AudioTrack::id)
-                val imported = candidates.filter { existingIds.add(it.id) }
+                val selection = selectUniqueImports(
+                    existingTracks = _uiState.value.tracks,
+                    candidates = candidates,
+                )
+                val imported = selection.tracks
 
                 if (imported.isEmpty()) {
-                    showMessage("${sourceName}中没有发现新的受支持音频")
+                    val duplicateMessage = if (selection.skippedDuplicateCount > 0) {
+                        "；已跳过 ${selection.skippedDuplicateCount} 首跨格式重复歌曲"
+                    } else {
+                        ""
+                    }
+                    showMessage("${sourceName}中没有发现新的受支持音频$duplicateMessage")
                     return@launch
                 }
 
@@ -176,14 +182,23 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
                 val analyzable = imported.filter { it.format.supportsLoudnessAnalysis }
                 val apeCount = imported.count { it.format == AudioFileFormat.APE }
-                val suffix = if (apeCount > 0) {
-                    "；$apeCount 首 APE 将由手机系统尝试解码"
-                } else {
-                    ""
+                val details = buildList {
+                    if (apeCount > 0) {
+                        add("$apeCount 首 APE 将实时解码且不生成副本")
+                    }
+                    if (selection.skippedDuplicateCount > 0) {
+                        add("已跳过 ${selection.skippedDuplicateCount} 首跨格式重复歌曲")
+                    }
                 }
-                showMessage("已按首字母导入 ${imported.size} 首音频，正在自动校验响度$suffix")
+                val suffix = if (details.isEmpty()) {
+                    ""
+                } else {
+                    details.joinToString(prefix = "；", separator = "；")
+                }
+                showMessage(
+                    "已按首字母导入 ${imported.size} 首音频，正在自动校验响度$suffix",
+                )
                 queueAnalysis(analyzable.map(AudioTrack::id))
-                queueApeConversions(imported.map(AudioTrack::id))
             } finally {
                 _uiState.update { it.copy(isImporting = false) }
             }
@@ -263,7 +278,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun analyzeTrack(trackId: String) {
         val track = _uiState.value.tracks.firstOrNull { it.id == trackId } ?: return
         if (!track.format.supportsLoudnessAnalysis) {
-            showMessage("APE 暂不支持响度分析")
+            showMessage("该音频格式暂不支持响度分析")
             return
         }
         queueAnalysis(listOf(trackId))
@@ -294,15 +309,15 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(appTheme = theme) }
     }
 
-    fun createMusicFolder(name: String) {
+    fun createMusicFolder(name: String): String? {
         val cleanName = name.trim().take(MAX_FOLDER_NAME_LENGTH)
         if (cleanName.isEmpty()) {
             showMessage("文件夹名称不能为空")
-            return
+            return null
         }
         if (_uiState.value.musicFolders.any { it.name.equals(cleanName, ignoreCase = true) }) {
             showMessage("已经存在同名文件夹")
-            return
+            return null
         }
         val folder = MusicFolder(
             id = UUID.randomUUID().toString(),
@@ -316,6 +331,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
         persistMusicFolders()
         showMessage("已创建文件夹“${cleanName}”")
+        return folder.id
     }
 
     fun selectMusicFolder(folderId: String?) {
@@ -427,12 +443,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun removeTrack(trackId: String) {
         val wasCurrent = _uiState.value.currentTrackId == trackId
         pendingAnalysisIds -= trackId
-        pendingApeConversionIds -= trackId
         _uiState.update {
             it.copy(
                 tracks = it.tracks.filterNot { track -> track.id == trackId },
                 analyzingIds = it.analyzingIds - trackId,
-                convertingIds = it.convertingIds - trackId,
                 currentTrackId = if (wasCurrent) null else it.currentTrackId,
                 musicFolders = it.musicFolders.map { folder ->
                     folder.copy(trackIds = folder.trackIds - trackId)
@@ -454,87 +468,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             .map(AudioTrack::id)
         queueAnalysis(missingIds)
         return missingIds.size
-    }
-
-    private fun queueApeConversions(trackIds: List<String>) {
-        val apeIds = trackIds
-            .distinct()
-            .filter { trackId ->
-                _uiState.value.tracks.any {
-                    it.id == trackId && it.format == AudioFileFormat.APE
-                }
-            }
-        if (apeIds.isEmpty()) return
-        pendingApeConversionIds += apeIds
-        _uiState.update { it.copy(convertingIds = it.convertingIds + apeIds) }
-        if (apeConversionJob?.isActive == true) return
-
-        apeConversionJob = viewModelScope.launch {
-            var convertedCount = 0
-            var failedCount = 0
-            while (pendingApeConversionIds.isNotEmpty()) {
-                val trackId = pendingApeConversionIds.first()
-                pendingApeConversionIds.remove(trackId)
-                val source = _uiState.value.tracks.firstOrNull {
-                    it.id == trackId && it.format == AudioFileFormat.APE
-                }
-                if (source == null) {
-                    _uiState.update { it.copy(convertingIds = it.convertingIds - trackId) }
-                    continue
-                }
-                runCatching { apeConverter.convert(source) }
-                    .onSuccess { converted ->
-                        repository.markApeSourceConverted(source.id)
-                        replaceConvertedTrack(source, converted)
-                        queueAnalysis(listOf(converted.id))
-                        convertedCount += 1
-                    }
-                    .onFailure {
-                        failedCount += 1
-                    }
-                _uiState.update { it.copy(convertingIds = it.convertingIds - trackId) }
-            }
-            val resultMessage = buildString {
-                if (convertedCount > 0) append("已自动转换 $convertedCount 首 APE 为 FLAC")
-                if (convertedCount > 0 && failedCount > 0) append("；")
-                if (failedCount > 0) append("$failedCount 首转换失败，已保留原 APE")
-            }
-            if (resultMessage.isNotEmpty()) showMessage(resultMessage)
-        }
-    }
-
-    private fun replaceConvertedTrack(
-        source: AudioTrack,
-        converted: AudioTrack,
-    ) {
-        val oldIndex = _uiState.value.tracks.indexOfFirst { it.id == source.id }
-        _uiState.update { state ->
-            state.copy(
-                tracks = state.tracks
-                    .map { if (it.id == source.id) converted else it }
-                    .sortedByTitleInitial(),
-                currentTrackId = if (state.currentTrackId == source.id) {
-                    converted.id
-                } else {
-                    state.currentTrackId
-                },
-                musicFolders = state.musicFolders.map { folder ->
-                    if (source.id !in folder.trackIds) {
-                        folder
-                    } else {
-                        folder.copy(trackIds = folder.trackIds - source.id + converted.id)
-                    }
-                },
-            )
-        }
-        persistTracks()
-        persistMusicFolders()
-        val newIndex = _uiState.value.tracks.indexOfFirst { it.id == converted.id }
-        if (oldIndex >= 0 && oldIndex == newIndex && oldIndex < player.mediaItemCount) {
-            player.replaceMediaItem(oldIndex, converted.toMediaItem())
-        } else {
-            syncPlayerQueue(autoPlay = player.isPlaying)
-        }
     }
 
     private fun queueAnalysis(trackIds: List<String>) {
@@ -559,7 +492,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.update { it.copy(analyzingIds = it.analyzingIds - trackId) }
                     continue
                 }
-                runCatching { analyzer.analyze(Uri.parse(track.uri)) }
+                runCatching {
+                    val uri = Uri.parse(track.uri)
+                    if (track.format == AudioFileFormat.APE) {
+                        apeAnalyzer.analyze(uri)
+                    } else {
+                        analyzer.analyze(uri)
+                    }
+                }
                     .onSuccess { result ->
                         _uiState.update { state ->
                             state.copy(
@@ -717,7 +657,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private fun AudioTrack.toMediaItem(): MediaItem =
         MediaItem.Builder()
             .setMediaId(id)
-            .setUri(uri)
+            .setUri(
+                if (format == AudioFileFormat.APE) {
+                    ApeStreamingDataSource.streamingUri(uri)
+                } else {
+                    Uri.parse(uri)
+                },
+            )
+            .apply {
+                if (format == AudioFileFormat.APE) setMimeType(APE_STREAM_MIME_TYPE)
+            }
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)
@@ -740,7 +689,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         analysisJob?.cancel()
-        apeConversionJob?.cancel()
         volumeRampJob?.cancel()
         loudnessEnhancer?.release()
         player.release()
@@ -753,6 +701,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         const val VOLUME_RAMP_STEPS = 8
         const val VOLUME_RAMP_STEP_MS = 20L
         const val MAX_FOLDER_NAME_LENGTH = 40
+        const val APE_STREAM_MIME_TYPE = "audio/wav"
     }
 }
 
@@ -773,7 +722,6 @@ data class PlayerUiState(
     val lyricsOverlayEnabled: Boolean = false,
     val appliedGainDb: Double = 0.0,
     val analyzingIds: Set<String> = emptySet(),
-    val convertingIds: Set<String> = emptySet(),
     val isImporting: Boolean = false,
     val message: String? = null,
 )
