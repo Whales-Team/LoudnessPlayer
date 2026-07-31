@@ -60,6 +60,8 @@ jobs:
             grep -aF "FLAC encoder" "$extract_dir/lib/$abi/libavcodec.so" >/dev/null
             grep -aF "pcm_s16le" "$extract_dir/lib/$abi/libavcodec.so" >/dev/null
             grep -aF "wav" "$extract_dir/lib/$abi/libavformat.so" >/dev/null
+            grep -aF "null" "$extract_dir/lib/$abi/libavformat.so" >/dev/null
+            grep -aF "ebur128" "$extract_dir/lib/$abi/libavfilter.so" >/dev/null
           done
 
           if find "$extract_dir/lib" -mindepth 1 -maxdepth 1 -type d \

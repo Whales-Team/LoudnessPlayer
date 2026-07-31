@@ -10,7 +10,7 @@ enum class AudioFileFormat(
     MP3("mp3", "MP3", true),
     FLAC("flac", "FLAC", true),
     WAV("wav", "WAV", true),
-    APE("ape", "APE", false),
+    APE("ape", "APE", true),
     ;
 
     companion object {

@@ -14,6 +14,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.wzl.loudnessplayer.audio.ApeLoudnessAnalyzer
 import com.wzl.loudnessplayer.audio.ApeStreamingDataSource
 import com.wzl.loudnessplayer.audio.LoudnessAnalyzer
 import com.wzl.loudnessplayer.audio.Normalization
@@ -45,6 +46,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val repository = TrackRepository(application)
     private val libraryScanner = AudioLibraryScanner(application, repository)
     private val analyzer = LoudnessAnalyzer(application)
+    private val apeAnalyzer = ApeLoudnessAnalyzer(application)
     private val playbackDataSourceFactory = DefaultDataSource.Factory(
         application,
         ApeStreamingDataSource.Factory(application),
@@ -276,7 +278,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun analyzeTrack(trackId: String) {
         val track = _uiState.value.tracks.firstOrNull { it.id == trackId } ?: return
         if (!track.format.supportsLoudnessAnalysis) {
-            showMessage("APE 暂不支持响度分析")
+            showMessage("该音频格式暂不支持响度分析")
             return
         }
         queueAnalysis(listOf(trackId))
@@ -490,7 +492,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.update { it.copy(analyzingIds = it.analyzingIds - trackId) }
                     continue
                 }
-                runCatching { analyzer.analyze(Uri.parse(track.uri)) }
+                runCatching {
+                    val uri = Uri.parse(track.uri)
+                    if (track.format == AudioFileFormat.APE) {
+                        apeAnalyzer.analyze(uri)
+                    } else {
+                        analyzer.analyze(uri)
+                    }
+                }
                     .onSuccess { result ->
                         _uiState.update { state ->
                             state.copy(
