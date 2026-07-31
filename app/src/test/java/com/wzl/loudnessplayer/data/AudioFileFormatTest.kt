@@ -1,8 +1,8 @@
 package com.wzl.loudnessplayer.data
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AudioFileFormatTest {
@@ -26,7 +26,7 @@ class AudioFileFormatTest {
     }
 
     @Test
-    fun apeDoesNotClaimLoudnessAnalysisSupport() {
-        assertFalse(AudioFileFormat.APE.supportsLoudnessAnalysis)
+    fun apeSupportsLoudnessAnalysisThroughBundledFfmpeg() {
+        assertTrue(AudioFileFormat.APE.supportsLoudnessAnalysis)
     }
 }
