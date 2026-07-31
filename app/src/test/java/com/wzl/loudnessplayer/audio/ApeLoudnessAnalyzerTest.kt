@@ -11,12 +11,12 @@ class ApeLoudnessAnalyzerTest {
             [Parsed_ebur128_0] t: 1.0 I: -45.0 LUFS
             [Parsed_ebur128_0] Summary:
 
-              Integrated loudness:
-                I:         -14.2 LUFS
-                Threshold: -24.5 LUFS
+            [Parsed_ebur128_0] Integrated loudness:
+            [Parsed_ebur128_0]   I:         -14.2 LUFS
+            [Parsed_ebur128_0]   Threshold: -24.5 LUFS
 
-              True peak:
-                Peak:       -0.7 dBFS
+            [Parsed_ebur128_0] Sample peak:
+            [Parsed_ebur128_0]   Peak:       -0.7 dBFS
         """.trimIndent()
 
         val result = parseFfmpegLoudnessSummary(output)

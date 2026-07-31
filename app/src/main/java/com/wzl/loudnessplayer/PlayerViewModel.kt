@@ -107,7 +107,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     val current = currentTrack()
                     if (current?.format == AudioFileFormat.APE) {
-                        showMessage("APE 实时解码失败；原文件未被修改")
+                        val detail = error.causeChain()
+                            .mapNotNull { it.message }
+                            .firstOrNull { it.startsWith("APE 实时解码失败") }
+                        showMessage(
+                            (detail ?: "APE 实时解码失败") + "；原文件未被修改",
+                        )
                     } else {
                         showMessage("播放失败：${error.errorCodeName}")
                     }
@@ -520,8 +525,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                             applyNormalization(smooth = true)
                         }
                     }
-                    .onFailure {
-                        showMessage("“${track.title}”响度分析失败")
+                    .onFailure { error ->
+                        val detail = error.message?.take(100)
+                        showMessage(
+                            "“${track.title}”响度分析失败" +
+                                if (detail == null) "" else "：$detail",
+                        )
                     }
                 _uiState.update { it.copy(analyzingIds = it.analyzingIds - trackId) }
             }
@@ -704,6 +713,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         const val APE_STREAM_MIME_TYPE = "audio/wav"
     }
 }
+
+private fun Throwable.causeChain(): Sequence<Throwable> =
+    generateSequence(this) { it.cause }
 
 data class PlayerUiState(
     val tracks: List<AudioTrack> = emptyList(),
