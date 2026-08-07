@@ -51,6 +51,7 @@ Each task uses the existing platform decoder first when supported, then the inte
 - Failed tracks have a status badge and an expandable one-line reason; normal playback actions remain enabled.
 - Long press a `TrackRow` to enter a selection toolbar showing count, “move to folder”, “remove from library”, “convert selected failures”, and Cancel.
 - Add previous/current/next queue previews to the bottom player surface, based on the active global or selected personal-folder queue and honoring shuffle order.
+- Show a compact floating “back to top” button after the active song list has scrolled beyond its first items. It scrolls the current All, Artist, Smart, or Failed list smoothly to the top without changing the selected view or playback queue.
 - Keep the v1.5.0 MediaSessionService and improve its metadata/queue synchronization so the standard Android lock-screen media card reliably stays available while playback is active. No custom overlay is displayed over the lock screen.
 - Add a Smart View toggle labelled “同歌手归为一组”; unknown artists are not grouped together.
 
