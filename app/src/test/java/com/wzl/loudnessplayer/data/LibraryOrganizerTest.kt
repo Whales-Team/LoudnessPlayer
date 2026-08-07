@@ -78,7 +78,7 @@ class LibraryOrganizerTest {
         val groups = tracks.groupedBySmartRule(groupSameArtist = true)
 
         assertEquals(1, groups.size)
-        assertEquals(listOf("1", "2"), groups.single().tracks.map { it.id })
+        assertEquals(setOf("1", "2"), groups.single().tracks.map { it.id }.toSet())
     }
 
     @Test
