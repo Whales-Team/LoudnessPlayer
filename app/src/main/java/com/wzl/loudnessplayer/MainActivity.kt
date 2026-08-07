@@ -116,6 +116,8 @@ class MainActivity : ComponentActivity() {
                 onNext = viewModel::playNext,
                 onSeek = viewModel::seekTo,
                 onNormalizationChanged = viewModel::setNormalizationEnabled,
+                onStartAnalysis = viewModel::startAnalysis,
+                onStopAnalysis = viewModel::stopAnalysis,
                 onTargetLoudnessChanged = viewModel::setTargetLoudness,
                 onPlaybackModeChanged = viewModel::setPlaybackMode,
                 onLibraryViewModeChanged = viewModel::setLibraryViewMode,

@@ -19,6 +19,7 @@ import com.wzl.loudnessplayer.audio.ApeStreamingDataSource
 import com.wzl.loudnessplayer.audio.LoudnessAnalyzer
 import com.wzl.loudnessplayer.audio.Normalization
 import com.wzl.loudnessplayer.data.AppTheme
+import com.wzl.loudnessplayer.data.AnalysisStatus
 import com.wzl.loudnessplayer.data.AudioFileFormat
 import com.wzl.loudnessplayer.data.DecoderPath
 import com.wzl.loudnessplayer.data.AudioLibraryScanner
@@ -35,6 +36,7 @@ import com.wzl.loudnessplayer.lyrics.TimedLyricLine
 import com.wzl.loudnessplayer.playback.PlaybackScope
 import com.wzl.loudnessplayer.playback.LoudnessPlaybackService
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,6 +72,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val pendingAnalysisIds = linkedSetOf<String>()
     private var loudnessEnhancer: LoudnessEnhancer? = null
     private var analysisJob: Job? = null
+    private var analysisStoppedByUser = false
     private var volumeRampJob: Job? = null
     private var cachedLyricsTrackId: String? = null
     private var cachedTimedLyrics: List<TimedLyricLine> = emptyList()
@@ -80,6 +83,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _uiState.update { it.copy(isPlaying = isPlaying) }
+                    if (isPlaying) {
+                        pauseAnalysisForPlayback()
+                    } else if (!analysisStoppedByUser) {
+                        resumePendingAnalysis()
+                    }
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -291,6 +299,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         queueAnalysis(listOf(trackId))
     }
 
+    fun startAnalysis() {
+        analysisStoppedByUser = false
+        queueMissingLoudnessAnalysis()
+    }
+
+    fun stopAnalysis() {
+        analysisStoppedByUser = true
+        pendingAnalysisIds += _uiState.value.analyzingIds
+        analysisJob?.cancel()
+        analysisJob = null
+        _uiState.update { it.copy(analyzingIds = emptySet()) }
+    }
+
     fun setPlaybackMode(mode: PlaybackMode) {
         repository.setPlaybackMode(mode)
         _uiState.update { it.copy(playbackMode = mode) }
@@ -476,7 +497,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun queueMissingLoudnessAnalysis(): Int {
         val missingIds = _uiState.value.tracks
-            .filter { it.format.supportsLoudnessAnalysis && it.loudnessLufs == null }
+            .filter { it.format.supportsLoudnessAnalysis && it.analysisStatus != AnalysisStatus.SUCCESS }
             .map(AudioTrack::id)
         queueAnalysis(missingIds)
         return missingIds.size
@@ -493,6 +514,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         if (validIds.isEmpty()) return
         pendingAnalysisIds += validIds
         _uiState.update { it.copy(analyzingIds = it.analyzingIds + validIds) }
+        if (player.isPlaying || analysisStoppedByUser) return
         if (analysisJob?.isActive == true) return
 
         analysisJob = viewModelScope.launch {
@@ -523,6 +545,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                                         it.copy(
                                             loudnessLufs = result.integratedLufs,
                                             samplePeakDbfs = result.samplePeakDbfs,
+                                            analysisStatus = AnalysisStatus.SUCCESS,
+                                            analysisFailureMessage = null,
                                         )
                                     } else {
                                         it
@@ -536,7 +560,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                     .onFailure { error ->
+                        if (error is CancellationException) return@onFailure
                         val detail = error.message?.take(100)
+                        _uiState.update { state ->
+                            state.copy(tracks = state.tracks.map {
+                                if (it.id == trackId) {
+                                    it.copy(
+                                        analysisStatus = AnalysisStatus.FAILED,
+                                        analysisFailureMessage = detail,
+                                    )
+                                } else it
+                            })
+                        }
+                        persistTracks()
                         showMessage(
                             "“${track.title}”响度分析失败" +
                                 if (detail == null) "" else "：$detail",
@@ -547,6 +583,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+    }
+
+    private fun pauseAnalysisForPlayback() {
+        if (analysisJob?.isActive != true) return
+        pendingAnalysisIds += _uiState.value.analyzingIds
+        analysisJob?.cancel()
+        analysisJob = null
+        _uiState.update { it.copy(analyzingIds = emptySet()) }
+    }
+
+    private fun resumePendingAnalysis() {
+        if (pendingAnalysisIds.isEmpty()) return
+        queueAnalysis(pendingAnalysisIds.toList())
     }
 
     private fun syncPlayerQueue(autoPlay: Boolean) {

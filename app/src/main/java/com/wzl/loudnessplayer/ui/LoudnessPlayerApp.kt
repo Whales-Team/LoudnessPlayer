@@ -110,6 +110,7 @@ import com.wzl.loudnessplayer.data.LibraryViewMode
 import com.wzl.loudnessplayer.data.MusicFolder
 import com.wzl.loudnessplayer.data.PlaybackMode
 import com.wzl.loudnessplayer.data.groupedByArtist
+import com.wzl.loudnessplayer.data.failedAnalysis
 import com.wzl.loudnessplayer.data.groupedBySimilarTitle
 import com.wzl.loudnessplayer.data.matchingSearch
 import com.wzl.loudnessplayer.data.sortedByTitleInitial
@@ -130,6 +131,8 @@ fun LoudnessPlayerApp(
     onNext: () -> Unit,
     onSeek: (Long) -> Unit,
     onNormalizationChanged: (Boolean) -> Unit,
+    onStartAnalysis: () -> Unit,
+    onStopAnalysis: () -> Unit,
     onTargetLoudnessChanged: (Double) -> Unit,
     onPlaybackModeChanged: (PlaybackMode) -> Unit,
     onLibraryViewModeChanged: (LibraryViewMode) -> Unit,
@@ -351,6 +354,21 @@ fun LoudnessPlayerApp(
                                 }
                             }
                         }
+
+                        LibraryViewMode.FAILED -> {
+                            items(visibleTracks.failedAnalysis(), key = AudioTrack::id) { track ->
+                                TrackRow(
+                                    track = track,
+                                    selected = track.id == state.currentTrackId,
+                                    analyzing = track.id in state.analyzingIds,
+                                    onClick = { onTrackClick(track.id) },
+                                    onAnalyze = { onAnalyze(track.id) },
+                                    onEditLyrics = { lyricsTrack = track },
+                                    onManageFolders = { folderTrack = track },
+                                    onRemove = { onRemove(track.id) },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -476,6 +494,8 @@ private fun SettingsDrawer(
                 analyzingCount = state.analyzingIds.size,
                 onEnabledChanged = onNormalizationChanged,
                 onConfigure = onConfigureLoudness,
+                onStartAnalysis = onStartAnalysis,
+                onStopAnalysis = onStopAnalysis,
             )
 
             Text(
@@ -622,6 +642,8 @@ private fun NormalizationCard(
     analyzingCount: Int,
     onEnabledChanged: (Boolean) -> Unit,
     onConfigure: () -> Unit,
+    onStartAnalysis: () -> Unit,
+    onStopAnalysis: () -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -682,6 +704,13 @@ private fun NormalizationCard(
                 checked = enabled,
                 onCheckedChange = onEnabledChanged,
             )
+        }
+        Row(
+            modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilledTonalButton(onClick = onStartAnalysis) { Text("开始校验") }
+            TextButton(onClick = onStopAnalysis, enabled = analyzingCount > 0) { Text("停止校验") }
         }
     }
 }

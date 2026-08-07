@@ -2,6 +2,9 @@ package com.wzl.loudnessplayer.data
 
 import java.text.Collator
 import java.util.Locale
+
+fun List<AudioTrack>.failedAnalysis(): List<AudioTrack> =
+    filter { it.analysisStatus == AnalysisStatus.FAILED }
 import kotlin.math.abs
 
 data class ArtistGroup(

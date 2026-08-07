@@ -37,6 +37,15 @@ class TrackRepository(context: Context) {
                             loudnessLufs = item.optNullableDouble("loudnessLufs"),
                             samplePeakDbfs = item.optNullableDouble("samplePeakDbfs"),
                             lyrics = item.optNullableString("lyrics"),
+                            analysisStatus = item.optString("analysisStatus")
+                                .takeIf(String::isNotBlank)
+                                ?.let { saved -> runCatching { AnalysisStatus.valueOf(saved) }.getOrNull() }
+                                ?: if (item.optNullableDouble("loudnessLufs") != null) {
+                                    AnalysisStatus.SUCCESS
+                                } else {
+                                    AnalysisStatus.PENDING
+                                },
+                            analysisFailureMessage = item.optNullableString("analysisFailureMessage"),
                         ),
                     )
                 }
@@ -58,6 +67,8 @@ class TrackRepository(context: Context) {
                     put("loudnessLufs", track.loudnessLufs ?: JSONObject.NULL)
                     put("samplePeakDbfs", track.samplePeakDbfs ?: JSONObject.NULL)
                     put("lyrics", track.lyrics ?: JSONObject.NULL)
+                    put("analysisStatus", track.analysisStatus.name)
+                    put("analysisFailureMessage", track.analysisFailureMessage ?: JSONObject.NULL)
                 },
             )
         }

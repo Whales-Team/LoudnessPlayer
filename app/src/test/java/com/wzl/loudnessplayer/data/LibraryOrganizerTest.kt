@@ -6,6 +6,26 @@ import org.junit.Test
 
 class LibraryOrganizerTest {
     @Test
+    fun filtersTracksWhoseLastLoudnessAttemptFailed() {
+        val tracks = listOf(
+            track("failed", "Artist", "Failed").copy(analysisStatus = AnalysisStatus.FAILED),
+            track("success", "Artist", "Success").copy(analysisStatus = AnalysisStatus.SUCCESS),
+        )
+
+        assertEquals(listOf("failed"), tracks.failedAnalysis().map { it.id })
+    }
+
+    @Test
+    fun editsDisplayMetadataWithoutChangingTheSourceUri() {
+        val original = track("song", "Old Artist", "Old Title")
+
+        val edited = original.withEditedMetadata(" New Title ", " New Artist ")
+
+        assertEquals("New Title", edited.title)
+        assertEquals("New Artist", edited.artist)
+        assertEquals(original.uri, edited.uri)
+    }
+    @Test
     fun groupsArtistsAlphabeticallyAndPlacesUnknownLast() {
         val tracks = listOf(
             track("3", "未知艺术家", "Unknown"),
