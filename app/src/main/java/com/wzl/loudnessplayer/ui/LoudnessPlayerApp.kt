@@ -206,6 +206,8 @@ fun LoudnessPlayerApp(
                         targetDialogVisible = true
                     },
                     onNormalizationChanged = onNormalizationChanged,
+                    onStartAnalysis = onStartAnalysis,
+                    onStopAnalysis = onStopAnalysis,
                     onImportFiles = {
                         coroutineScope.launch { drawerState.close() }
                         onImportFiles()
@@ -529,6 +531,8 @@ private fun SettingsDrawer(
     onClose: () -> Unit,
     onConfigureLoudness: () -> Unit,
     onNormalizationChanged: (Boolean) -> Unit,
+    onStartAnalysis: () -> Unit,
+    onStopAnalysis: () -> Unit,
     onImportFiles: () -> Unit,
     onImportFolder: () -> Unit,
     onScanDevice: () -> Unit,
