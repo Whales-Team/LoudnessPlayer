@@ -40,4 +40,20 @@ class ApeLoudnessAnalyzerTest {
             ),
         )
     }
+
+    @Test
+    fun parsesIntegratedLoudnessWhenThePeakModeIsUnavailable() {
+        val output = """
+            [Parsed_ebur128_0] Summary:
+
+            [Parsed_ebur128_0] Integrated loudness:
+            [Parsed_ebur128_0]   I:         -16.4 LUFS
+            [Parsed_ebur128_0]   Threshold: -26.4 LUFS
+        """.trimIndent()
+
+        val result = parseFfmpegIntegratedLoudnessSummary(output)
+
+        assertEquals(-16.4, result?.integratedLufs ?: 0.0, 0.001)
+        assertEquals(0.0, result?.samplePeakDbfs ?: -1.0, 0.001)
+    }
 }

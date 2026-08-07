@@ -75,3 +75,28 @@ jobs:
         with:
           name: LoudnessPlayer-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Restore stable release signing key
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/loudness-player-release.jks"
+
+      - name: Build signed release APK
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          LOUDNESSPLAYER_KEYSTORE_PATH: ${{ runner.temp }}/loudness-player-release.jks
+          LOUDNESSPLAYER_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          LOUDNESSPLAYER_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          LOUDNESSPLAYER_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Upload signed release APK
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LoudnessPlayer-release
+          path: app/build/outputs/apk/release/app-release.apk

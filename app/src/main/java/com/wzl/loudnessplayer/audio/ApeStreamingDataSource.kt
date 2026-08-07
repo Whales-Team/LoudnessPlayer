@@ -34,6 +34,8 @@ class ApeStreamingDataSource private constructor(
     private var pipeAnchor: ParcelFileDescriptor? = null
     private var inputStream: FileInputStream? = null
     private var ffmpegSession: FFmpegSession? = null
+    private var wavHeader = ByteArray(0)
+    private var wavHeaderPosition = 0
     private var opened = false
     @Volatile
     private var receivedAudio = false
@@ -47,6 +49,27 @@ class ApeStreamingDataSource private constructor(
 
         val sourceUri = sourceUri(dataSpec.uri)
             ?: throw IOException("APE 实时解码地址无效")
+        val pcmDataBytes = ApeAudioInfo.read(appContext, sourceUri)
+            ?.pcmDataBytes(
+                outputSampleRateHz = OUTPUT_SAMPLE_RATE_HZ,
+                outputChannelCount = OUTPUT_CHANNELS,
+                bytesPerSample = PCM_BYTES_PER_SAMPLE,
+            )
+        val requestedPcmBytePosition = if (pcmDataBytes != null) {
+            (dataSpec.position - PcmWavHeader.HEADER_SIZE).coerceAtLeast(0L)
+        } else {
+            dataSpec.position
+        }
+        wavHeader = if (pcmDataBytes != null && dataSpec.position == 0L) {
+            PcmWavHeader.create(
+                sampleRateHz = OUTPUT_SAMPLE_RATE_HZ,
+                channelCount = OUTPUT_CHANNELS,
+                pcmDataBytes = pcmDataBytes,
+            )
+        } else {
+            ByteArray(0)
+        }
+        wavHeaderPosition = 0
         val registeredPipe = FFmpegKitConfig.registerNewFFmpegPipe(appContext)
             ?.takeIf(String::isNotBlank)
             ?: throw IOException("无法创建 APE 实时解码管道")
@@ -65,7 +88,8 @@ class ApeStreamingDataSource private constructor(
                 ApeFfmpegCommands.stream(
                     input = ffmpegInput(sourceUri),
                     outputPipe = registeredPipe,
-                    requestedBytePosition = dataSpec.position,
+                    requestedBytePosition = requestedPcmBytePosition,
+                    emitWavHeader = pcmDataBytes == null,
                 ),
                 ::onFfmpegCompleted,
             )
@@ -76,7 +100,9 @@ class ApeStreamingDataSource private constructor(
 
         opened = true
         transferStarted(dataSpec)
-        return C.LENGTH_UNSET.toLong()
+        return pcmDataBytes?.let { dataBytes ->
+            (PcmWavHeader.HEADER_SIZE + dataBytes - dataSpec.position).coerceAtLeast(0L)
+        } ?: C.LENGTH_UNSET.toLong()
     }
 
     override fun read(
@@ -86,6 +112,18 @@ class ApeStreamingDataSource private constructor(
     ): Int {
         if (length == 0) return 0
         decodingFailure?.let { throw it }
+        if (wavHeaderPosition < wavHeader.size) {
+            val bytesRead = minOf(length, wavHeader.size - wavHeaderPosition)
+            wavHeader.copyInto(
+                destination = buffer,
+                destinationOffset = offset,
+                startIndex = wavHeaderPosition,
+                endIndex = wavHeaderPosition + bytesRead,
+            )
+            wavHeaderPosition += bytesRead
+            bytesTransferred(bytesRead)
+            return bytesRead
+        }
         val stream = inputStream ?: return C.RESULT_END_OF_INPUT
         val bytesRead = try {
             stream.read(buffer, offset, length)
@@ -117,6 +155,8 @@ class ApeStreamingDataSource private constructor(
         currentUri = null
         receivedAudio = false
         decodingFailure = null
+        wavHeader = ByteArray(0)
+        wavHeaderPosition = 0
         if (wasOpened) transferEnded()
     }
 
@@ -177,6 +217,9 @@ class ApeStreamingDataSource private constructor(
     companion object {
         private const val STREAM_SCHEME = "loudness-ape"
         private const val SOURCE_PARAMETER = "source"
+        private const val OUTPUT_SAMPLE_RATE_HZ = 48_000
+        private const val OUTPUT_CHANNELS = 2
+        private const val PCM_BYTES_PER_SAMPLE = 2
 
         fun streamingUri(sourceUri: String): Uri = Uri.Builder()
             .scheme(STREAM_SCHEME)
