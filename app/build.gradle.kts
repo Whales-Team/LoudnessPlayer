@@ -3,6 +3,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseKeystorePath = providers.environmentVariable("LOUDNESSPLAYER_KEYSTORE_PATH").orNull
+val releaseKeystorePassword = providers.environmentVariable("LOUDNESSPLAYER_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("LOUDNESSPLAYER_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("LOUDNESSPLAYER_KEY_PASSWORD").orNull
+
 android {
     namespace = "com.wzl.loudnessplayer"
     compileSdk = 36
@@ -11,13 +16,24 @@ android {
         applicationId = "com.wzl.loudnessplayer"
         minSdk = 24
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.3.1"
+        versionCode = 6
+        versionName = "1.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            if (!releaseKeystorePath.isNullOrBlank()) {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -34,6 +50,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            if (!releaseKeystorePath.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

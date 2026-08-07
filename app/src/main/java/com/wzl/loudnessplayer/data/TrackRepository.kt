@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.wzl.loudnessplayer.audio.ApeAudioInfo
 import com.wzl.loudnessplayer.audio.Normalization
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -176,6 +177,11 @@ class TrackRepository(context: Context) {
         val mimeType = hint?.mimeType ?: appContext.contentResolver.getType(uri)
         val format = AudioFileFormat.from(displayName, mimeType)
             ?: error("不支持的音频格式")
+        val apeInfo = if (format == AudioFileFormat.APE) {
+            ApeAudioInfo.read(appContext, uri)
+        } else {
+            null
+        }
 
         val hasCompleteHint = hint?.title.cleanMetadata() != null &&
             hint?.artist.cleanArtist() != null &&
@@ -213,7 +219,8 @@ class TrackRepository(context: Context) {
             artist = extracted?.artist.cleanArtist()
                 ?: hint?.artist.cleanArtist()
                 ?: "未知艺术家",
-            durationMs = extracted?.durationMs
+            durationMs = apeInfo?.durationMs
+                ?: extracted?.durationMs
                 ?.takeIf { it > 0L }
                 ?: hint?.durationMs?.coerceAtLeast(0L)
                 ?: 0L,
@@ -226,6 +233,19 @@ class TrackRepository(context: Context) {
         val mimeType = appContext.contentResolver.getType(uri)
         return AudioFileFormat.from(displayName, mimeType) != null
     }
+
+    suspend fun refreshApeDurations(tracks: List<AudioTrack>): Map<String, Long> =
+        withContext(Dispatchers.IO) {
+            tracks.asSequence()
+                .filter { it.format == AudioFileFormat.APE }
+                .mapNotNull { track ->
+                    ApeAudioInfo.read(appContext, Uri.parse(track.uri))
+                        ?.durationMs
+                        ?.takeIf { it > 0L && it != track.durationMs }
+                        ?.let { track.id to it }
+                }
+                .toMap()
+        }
 
     private fun queryDisplayName(uri: Uri): String? {
         val projection = arrayOf(OpenableColumns.DISPLAY_NAME)

@@ -121,6 +121,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         )
         applyPlaybackMode(_uiState.value.playbackMode)
         syncPlayerQueue(autoPlay = false)
+        refreshApeDurations()
         if (_uiState.value.lyricsOverlayEnabled) {
             runCatching { LyricsOverlayService.start(appContext) }
         }
@@ -246,7 +247,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun seekTo(positionMs: Long) {
-        player.seekTo(positionMs.coerceIn(0L, player.duration.coerceAtLeast(0L)))
+        player.seekTo(positionMs.coerceIn(0L, playbackDurationMs()))
         publishPlaybackState()
         updateLyricsOverlay(force = true)
     }
@@ -619,7 +620,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun publishPlaybackState() {
-        val safeDuration = player.duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0L) ?: 0L
+        val safeDuration = playbackDurationMs()
         _uiState.update {
             it.copy(
                 isPlaying = player.isPlaying,
@@ -627,6 +628,34 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 durationMs = safeDuration,
             )
         }
+    }
+
+    private fun refreshApeDurations() {
+        viewModelScope.launch {
+            val correctedDurations = repository.refreshApeDurations(_uiState.value.tracks)
+            if (correctedDurations.isEmpty()) return@launch
+            _uiState.update { state ->
+                state.copy(
+                    tracks = state.tracks.map { track ->
+                        correctedDurations[track.id]
+                            ?.let { durationMs -> track.copy(durationMs = durationMs) }
+                            ?: track
+                    },
+                )
+            }
+            persistTracks()
+            publishPlaybackState()
+        }
+    }
+
+    private fun playbackDurationMs(): Long {
+        val trackDuration = currentTrack()
+            ?.takeIf { it.format == AudioFileFormat.APE }
+            ?.durationMs
+            ?.takeIf { it > 0L }
+        return trackDuration
+            ?: player.duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0L)
+            ?: 0L
     }
 
     private fun startPositionUpdates() {

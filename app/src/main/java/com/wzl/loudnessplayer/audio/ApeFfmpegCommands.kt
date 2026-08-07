@@ -13,6 +13,7 @@ internal object ApeFfmpegCommands {
         input: String,
         outputPipe: String,
         requestedBytePosition: Long,
+        emitWavHeader: Boolean = true,
     ): Array<String> {
         val seekSeconds = requestedBytePosition
             .coerceAtLeast(0L)
@@ -39,14 +40,17 @@ internal object ApeFfmpegCommands {
                     "-c:a",
                     "pcm_s16le",
                     "-f",
-                    if (requestedBytePosition == 0L) "wav" else "s16le",
+                    if (emitWavHeader && requestedBytePosition == 0L) "wav" else "s16le",
                     outputPipe,
                 ),
             )
         }.toTypedArray()
     }
 
-    fun analyze(input: String): Array<String> =
+    fun analyze(
+        input: String,
+        includeSamplePeak: Boolean = true,
+    ): Array<String> =
         arrayOf(
             "-nostdin",
             "-hide_banner",
@@ -61,7 +65,7 @@ internal object ApeFfmpegCommands {
             "-sn",
             "-dn",
             "-af",
-            "ebur128=peak=sample",
+            if (includeSamplePeak) "ebur128=peak=sample" else "ebur128",
             "-f",
             "null",
             "-",

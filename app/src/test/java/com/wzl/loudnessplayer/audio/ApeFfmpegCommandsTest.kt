@@ -31,12 +31,34 @@ class ApeFfmpegCommandsTest {
     }
 
     @Test
+    fun finitePcmStreamNeverLetsFfmpegWriteAnUnknownLengthWavHeader() {
+        val arguments = ApeFfmpegCommands.stream(
+            input = "saf:1",
+            outputPipe = "/cache/ffmpeg_pipe_1",
+            requestedBytePosition = 0L,
+            emitWavHeader = false,
+        )
+
+        assertEquals("s16le", arguments.valueAfter("-f"))
+    }
+
+    @Test
     fun analyzerUsesPortableSamplePeakAndDiscardOutput() {
         val arguments = ApeFfmpegCommands.analyze("saf:1")
 
         assertEquals("ebur128=peak=sample", arguments.valueAfter("-af"))
         assertEquals("null", arguments.valueAfter("-f"))
         assertEquals("-", arguments.last())
+    }
+
+    @Test
+    fun analyzerCanFallBackToPlainEbur128() {
+        val arguments = ApeFfmpegCommands.analyze(
+            input = "saf:1",
+            includeSamplePeak = false,
+        )
+
+        assertEquals("ebur128", arguments.valueAfter("-af"))
     }
 
     private fun Array<String>.valueAfter(option: String): String {

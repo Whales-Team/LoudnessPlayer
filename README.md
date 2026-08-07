@@ -51,9 +51,9 @@ LoudnessPlayer 是一款 Android 本地音乐播放器，支持 MP3、FLAC、WAV
 APE 不依赖手机系统解码器：
 
 1. FFmpeg 在应用内实时解码 APE。
-2. PCM/WAV 音频流通过短生命周期命名管道交给 Media3。
+2. 应用根据 APE 帧计数写入精确的 PCM/WAV 时长头，音频流再通过短生命周期命名管道交给 Media3。
 3. 管道随播放关闭，不会生成或保存 FLAC、WAV 副本。
-4. APE 响度分析的解码输出直接丢弃，只保存响度和峰值数值。
+4. APE 响度分析的解码输出直接丢弃，只保存响度和峰值数值；遇到不支持采样峰值的滤镜时会退回到保守的积分响度分析。
 
 v1.2.0 曾把 APE 转换到 `Music/LoudnessPlayer`。v1.3.0 不再创建这种副本，但不会自动删除旧版本已经生成的 FLAC，避免误删用户文件。
 
@@ -92,7 +92,7 @@ v1.2.0 曾把 APE 转换到 `Music/LoudnessPlayer`。v1.3.0 不再创建这种�
 
 前往 [Releases](https://github.com/Whales-Team/LoudnessPlayer/releases) 下载最新版本中以 `.apk` 结尾的文件。`Source code (zip)` 和 `Source code (tar.gz)` 是源码，不能直接安装。
 
-当前发布包使用 GitHub Actions 调试签名。如果手机提示无法覆盖安装旧版本，请先卸载旧版。卸载会清除应用内歌单、歌词和设置，但不会删除手机中的原始音频；安装后可重新扫描导入。
+v1.4.0 起发布包使用固定发布签名。首次从旧的临时签名版本升级时，Android 会要求先卸载旧版；卸载会清除应用内歌单、歌词和设置，但不会删除手机中的原始音频。安装 v1.4.0 后，后续从 Releases 下载的更高版本可直接覆盖安装，并保留应用内数据。
 
 ## 本地构建
 
@@ -107,6 +107,13 @@ APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。
 仓库包含经过校验的 ARM32 JNI 库。重建固定版本时，可在 GitHub Actions 手动运行 `Build ARMv7 FFmpeg JNI`。构建参数和二进制哈希见 [`third_party/ffmpeg-armv7/BUILD_METADATA.txt`](third_party/ffmpeg-armv7/BUILD_METADATA.txt)。
 
 ## 版本更新记录
+
+### v1.4.0（2026-08-07）
+
+- 修复部分 APE 在播放器中被错误识别为数百小时、播放完实际音频后出现静音尾部的问题：不再把未知长度 WAV 头交给播放器。
+- 使用 APE 文件头中的帧数和采样率修正导入歌曲与旧歌单条目的时长，进度条、拖动和播放列表长度以真实时长为准。
+- APE 响度分析保留采样峰值优先策略；若 FFmpeg 仅不兼容该峰值选项，则自动退回积分响度校验，并保持保守的峰值保护。
+- GitHub Actions 改为使用固定发布签名构建 release APK；从本版开始，后续更新可覆盖安装并保留歌单、歌词、设置和文件夹关联。
 
 ### v1.3.1（2026-07-31）
 
