@@ -18,7 +18,7 @@ class FlacRecoveryConverter(context: Context) {
         suspendCancellableCoroutine { continuation ->
             val input = source.toFfmpegInput()
             val output = FFmpegKitConfig.getSafParameterForWrite(appContext, destination)
-            val session = FFmpegKit.executeWithArgumentsAsync(arguments(input, output)) { completed ->
+            val session = FFmpegKit.executeWithArgumentsAsync(arguments(input, output).toTypedArray()) { completed ->
                 if (continuation.isActive) {
                     continuation.resume(
                         ConversionResult(

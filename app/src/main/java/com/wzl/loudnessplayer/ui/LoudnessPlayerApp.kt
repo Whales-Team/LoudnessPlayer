@@ -440,6 +440,7 @@ fun LoudnessPlayerApp(
             }
         }
         }
+        }
 
         if (targetDialogVisible) {
             TargetLoudnessDialog(
