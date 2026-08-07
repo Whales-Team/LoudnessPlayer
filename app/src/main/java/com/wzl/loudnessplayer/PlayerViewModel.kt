@@ -20,6 +20,7 @@ import com.wzl.loudnessplayer.audio.LoudnessAnalyzer
 import com.wzl.loudnessplayer.audio.Normalization
 import com.wzl.loudnessplayer.data.AppTheme
 import com.wzl.loudnessplayer.data.AudioFileFormat
+import com.wzl.loudnessplayer.data.DecoderPath
 import com.wzl.loudnessplayer.data.AudioLibraryScanner
 import com.wzl.loudnessplayer.data.AudioTrack
 import com.wzl.loudnessplayer.data.LibraryViewMode
@@ -31,6 +32,8 @@ import com.wzl.loudnessplayer.data.sortedByTitleInitial
 import com.wzl.loudnessplayer.lyrics.LrcParser
 import com.wzl.loudnessplayer.lyrics.LyricsOverlayService
 import com.wzl.loudnessplayer.lyrics.TimedLyricLine
+import com.wzl.loudnessplayer.playback.PlaybackScope
+import com.wzl.loudnessplayer.playback.LoudnessPlaybackService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,13 +50,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val libraryScanner = AudioLibraryScanner(application, repository)
     private val analyzer = LoudnessAnalyzer(application)
     private val apeAnalyzer = ApeLoudnessAnalyzer(application)
-    private val playbackDataSourceFactory = DefaultDataSource.Factory(
-        application,
-        ApeStreamingDataSource.Factory(application),
-    )
-    private val player = ExoPlayer.Builder(application)
-        .setMediaSourceFactory(DefaultMediaSourceFactory(playbackDataSourceFactory))
-        .build()
+    private val player = LoudnessPlaybackService.player(application)
 
     private val _uiState = MutableStateFlow(
         PlayerUiState(
@@ -212,8 +209,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun playTrack(trackId: String) {
-        val index = _uiState.value.tracks.indexOfFirst { it.id == trackId }
+        val scopedTracks = activeTracks()
+        val index = scopedTracks.indexOfFirst { it.id == trackId }
         if (index < 0) return
+        if (player.mediaItemCount != scopedTracks.size) syncPlayerQueue(autoPlay = false)
+        LoudnessPlaybackService.ensureStarted(appContext)
         player.seekToDefaultPosition(index)
         player.prepare()
         player.play()
@@ -225,6 +225,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         if (player.isPlaying) {
             player.pause()
         } else {
+            LoudnessPlaybackService.ensureStarted(appContext)
             if (player.playbackState == Player.STATE_IDLE) player.prepare()
             player.play()
         }
@@ -345,6 +346,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value.musicFolders.any { it.id == id }
         }
         _uiState.update { it.copy(selectedFolderId = validId) }
+        syncPlayerQueue(autoPlay = false)
     }
 
     fun deleteMusicFolder(folderId: String) {
@@ -360,6 +362,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         persistMusicFolders()
+        syncPlayerQueue(autoPlay = false)
         showMessage("已删除文件夹“${folder.name}”，歌曲仍保留在音乐库")
     }
 
@@ -387,6 +390,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         persistMusicFolders()
+        if (_uiState.value.selectedFolderId == folderId) {
+            syncPlayerQueue(autoPlay = false)
+        }
     }
 
     fun setTrackLyrics(trackId: String, lyrics: String) {
@@ -490,7 +496,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         if (analysisJob?.isActive == true) return
 
         analysisJob = viewModelScope.launch {
-            while (pendingAnalysisIds.isNotEmpty()) {
+            repeat(MAX_CONCURRENT_ANALYSES) {
+                launch {
+                    while (pendingAnalysisIds.isNotEmpty()) {
                 val trackId = pendingAnalysisIds.first()
                 pendingAnalysisIds.remove(trackId)
                 val track = _uiState.value.tracks.firstOrNull { it.id == trackId }
@@ -500,10 +508,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 runCatching {
                     val uri = Uri.parse(track.uri)
-                    if (track.format == AudioFileFormat.APE) {
-                        apeAnalyzer.analyze(uri)
+                    if (track.format.decoderPath == DecoderPath.FFMPEG_PCM) {
+                        apeAnalyzer.analyze(uri, track.format.displayName)
                     } else {
-                        analyzer.analyze(uri)
+                        runCatching { analyzer.analyze(uri) }
+                            .getOrElse { apeAnalyzer.analyze(uri, track.format.displayName) }
                     }
                 }
                     .onSuccess { result ->
@@ -534,6 +543,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                 _uiState.update { it.copy(analyzingIds = it.analyzingIds - trackId) }
+                    }
+                }
             }
         }
     }
@@ -542,8 +553,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         val state = _uiState.value
         val currentId = player.currentMediaItem?.mediaId ?: state.currentTrackId
         val currentPosition = player.currentPosition.coerceAtLeast(0L)
-        val startIndex = state.tracks.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
-        val items = state.tracks.map { it.toMediaItem() }
+        val tracks = activeTracks(state)
+        val startIndex = tracks.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
+        val items = tracks.map { it.toMediaItem() }
         if (items.isEmpty()) {
             player.clearMediaItems()
             player.stop()
@@ -692,18 +704,24 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private fun currentTrack(): AudioTrack? =
         _uiState.value.tracks.firstOrNull { it.id == _uiState.value.currentTrackId }
 
+    private fun activeTracks(state: PlayerUiState = _uiState.value): List<AudioTrack> =
+        PlaybackScope.resolve(
+            tracks = state.tracks,
+            selectedFolder = state.musicFolders.firstOrNull { it.id == state.selectedFolderId },
+        )
+
     private fun AudioTrack.toMediaItem(): MediaItem =
         MediaItem.Builder()
             .setMediaId(id)
             .setUri(
-                if (format == AudioFileFormat.APE) {
-                    ApeStreamingDataSource.streamingUri(uri)
+                if (format.decoderPath == DecoderPath.FFMPEG_PCM) {
+                    ApeStreamingDataSource.streamingUri(uri, format, durationMs)
                 } else {
                     Uri.parse(uri)
                 },
             )
             .apply {
-                if (format == AudioFileFormat.APE) setMimeType(APE_STREAM_MIME_TYPE)
+                if (format.decoderPath == DecoderPath.FFMPEG_PCM) setMimeType(APE_STREAM_MIME_TYPE)
             }
             .setMediaMetadata(
                 MediaMetadata.Builder()
@@ -729,7 +747,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         analysisJob?.cancel()
         volumeRampJob?.cancel()
         loudnessEnhancer?.release()
-        player.release()
         super.onCleared()
     }
 
@@ -739,6 +756,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         const val VOLUME_RAMP_STEPS = 8
         const val VOLUME_RAMP_STEP_MS = 20L
         const val MAX_FOLDER_NAME_LENGTH = 40
+        const val MAX_CONCURRENT_ANALYSES = 2
         const val APE_STREAM_MIME_TYPE = "audio/wav"
     }
 }

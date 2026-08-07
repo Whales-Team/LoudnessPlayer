@@ -20,6 +20,7 @@ enum class AppTheme(val displayName: String) {
     DARK("深色"),
     GREEN("绿色"),
     BLUE("蓝色"),
+    BROWN("棕色"),
 }
 
 data class MusicFolder(
