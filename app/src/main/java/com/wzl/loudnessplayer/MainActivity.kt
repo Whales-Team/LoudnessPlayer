@@ -14,6 +14,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wzl.loudnessplayer.ui.LoudnessPlayerApp
@@ -30,6 +33,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            var recoveryTrackId by remember { mutableStateOf<String?>(null) }
             val state by viewModel.uiState.collectAsStateWithLifecycle()
             val picker = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.OpenMultipleDocuments(),
@@ -55,6 +59,21 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     viewModel.importFolder(uri)
+                }
+            }
+            val recoveryFolderPicker = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocumentTree(),
+            ) { uri ->
+                val trackId = recoveryTrackId
+                recoveryTrackId = null
+                if (uri != null && trackId != null) {
+                    runCatching {
+                        contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                        )
+                    }
+                    viewModel.recoverFailedTrackAsFlac(trackId, uri)
                 }
             }
             val permissionPicker = rememberLauncherForActivityResult(
@@ -122,6 +141,7 @@ class MainActivity : ComponentActivity() {
                 onPlaybackModeChanged = viewModel::setPlaybackMode,
                 onLibraryViewModeChanged = viewModel::setLibraryViewMode,
                 onSearchQueryChanged = viewModel::setSearchQuery,
+                onSameArtistGroupingChanged = viewModel::setSameArtistGrouping,
                 onThemeChanged = viewModel::setAppTheme,
                 onLyricsOverlayChanged = { enabled ->
                     when {
@@ -142,6 +162,17 @@ class MainActivity : ComponentActivity() {
                 onLyricsChanged = viewModel::setTrackLyrics,
                 onAnalyze = viewModel::analyzeTrack,
                 onRemove = viewModel::removeTrack,
+                onTrackLongClick = viewModel::toggleTrackSelection,
+                onClearTrackSelection = viewModel::clearTrackSelection,
+                onMoveSelectedToFolder = viewModel::moveSelectedToFolder,
+                onRemoveSelected = viewModel::removeSelectedFromLibrary,
+                onEditTrackMetadata = viewModel::editTrackMetadata,
+                onRecoverAsFlac = { trackId ->
+                    recoveryTrackId = trackId
+                    recoveryFolderPicker.launch(null)
+                },
+                onConfirmDeleteRecoveredOriginal = viewModel::confirmDeleteRecoveredOriginal,
+                onKeepRecoveredOriginal = viewModel::keepRecoveredOriginal,
                 onMessageConsumed = viewModel::consumeMessage,
             )
         }

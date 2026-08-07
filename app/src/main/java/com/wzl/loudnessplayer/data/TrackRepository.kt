@@ -112,6 +112,12 @@ class TrackRepository(context: Context) {
         preferences.edit().putString(KEY_LIBRARY_VIEW_MODE, mode.name).apply()
     }
 
+    fun isSameArtistGroupingEnabled(): Boolean = preferences.getBoolean(KEY_SAME_ARTIST_GROUPING, false)
+
+    fun setSameArtistGroupingEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_SAME_ARTIST_GROUPING, enabled).apply()
+    }
+
     fun playbackMode(): PlaybackMode =
         runCatching {
             PlaybackMode.valueOf(
@@ -298,6 +304,7 @@ class TrackRepository(context: Context) {
         const val KEY_TRACKS = "tracks"
         const val KEY_NORMALIZATION_ENABLED = "normalization_enabled"
         const val KEY_GROUP_BY_ARTIST = "group_by_artist"
+        const val KEY_SAME_ARTIST_GROUPING = "same_artist_grouping"
         const val KEY_TARGET_LOUDNESS_LUFS = "target_loudness_lufs"
         const val KEY_LIBRARY_VIEW_MODE = "library_view_mode"
         const val KEY_PLAYBACK_MODE = "playback_mode"

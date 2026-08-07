@@ -161,6 +161,31 @@ fun List<AudioTrack>.groupedBySimilarTitle(): List<SmartTitleGroup> {
     return result
 }
 
+/**
+ * Groups tracks by the existing title rule and, when requested, also joins tracks with the same
+ * known artist.  "Unknown artist" entries deliberately remain separate: treating all of them as
+ * one artist would make the smart view less useful.
+ */
+fun List<AudioTrack>.groupedBySmartRule(groupSameArtist: Boolean): List<SmartTitleGroup> {
+    if (!groupSameArtist) return groupedBySimilarTitle()
+    val knownArtistGroups = filterNot { it.artist.isUnknownArtist() }
+        .groupBy { it.artist.trim().lowercase(Locale.ROOT) }
+        .values
+        .filter { it.size > 1 }
+        .map { tracks ->
+            SmartTitleGroup(
+                label = "同一歌手 · ${tracks.first().artist}",
+                tracks = tracks.sortedByTitleInitial(),
+            )
+        }
+    val groupedIds = knownArtistGroups.flatMap { it.tracks }.mapTo(mutableSetOf(), AudioTrack::id)
+    return knownArtistGroups + filterNot { it.id in groupedIds }.groupedBySimilarTitle()
+}
+
+private fun String.isUnknownArtist(): Boolean =
+    trim().isEmpty() || trim().equals("未知艺术家", ignoreCase = true) ||
+        trim().equals("unknown artist", ignoreCase = true)
+
 internal fun searchableFields(track: AudioTrack): List<String> =
     FIELD_PATTERN
         .findAll("${track.title} ${track.artist}".lowercase(Locale.ROOT))

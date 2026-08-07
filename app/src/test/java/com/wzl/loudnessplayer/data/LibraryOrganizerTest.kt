@@ -69,6 +69,19 @@ class LibraryOrganizerTest {
     }
 
     @Test
+    fun smartRuleCanGroupTracksWithTheSameKnownArtist() {
+        val tracks = listOf(
+            track("1", "Singer", "Morning"),
+            track("2", "Singer", "Evening"),
+        )
+
+        val groups = tracks.groupedBySmartRule(groupSameArtist = true)
+
+        assertEquals(1, groups.size)
+        assertEquals(listOf("1", "2"), groups.single().tracks.map { it.id })
+    }
+
+    @Test
     fun keepsPreferredFormatWhenNewBatchContainsSameRecording() {
         val selection = selectUniqueImports(
             existingTracks = emptyList(),
