@@ -14,7 +14,10 @@ import kotlin.coroutines.resume
 class ApeLoudnessAnalyzer(context: Context) {
     private val appContext = context.applicationContext
 
-    suspend fun analyze(uri: Uri): R128Meter.LoudnessResult {
+    suspend fun analyze(
+        uri: Uri,
+        formatLabel: String = "闊抽",
+    ): R128Meter.LoudnessResult {
         val input = if (uri.scheme.equals("content", ignoreCase = true)) {
             FFmpegKitConfig.getSafParameterForRead(appContext, uri)
         } else {

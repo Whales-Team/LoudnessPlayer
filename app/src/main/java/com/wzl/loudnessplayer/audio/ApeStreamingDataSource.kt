@@ -12,6 +12,7 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.FFmpegSession
 import com.arthenica.ffmpegkit.ReturnCode
+import com.wzl.loudnessplayer.data.AudioFileFormat
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
@@ -49,12 +50,22 @@ class ApeStreamingDataSource private constructor(
 
         val sourceUri = sourceUri(dataSpec.uri)
             ?: throw IOException("APE 实时解码地址无效")
-        val pcmDataBytes = ApeAudioInfo.read(appContext, sourceUri)
-            ?.pcmDataBytes(
-                outputSampleRateHz = OUTPUT_SAMPLE_RATE_HZ,
-                outputChannelCount = OUTPUT_CHANNELS,
-                bytesPerSample = PCM_BYTES_PER_SAMPLE,
-            )
+        val sourceFormat = dataSpec.uri.getQueryParameter(FORMAT_PARAMETER)
+            ?.let { runCatching { AudioFileFormat.valueOf(it) }.getOrNull() }
+            ?: AudioFileFormat.APE
+        val pcmDataBytes = if (sourceFormat == AudioFileFormat.APE) {
+            ApeAudioInfo.read(appContext, sourceUri)
+                ?.pcmDataBytes(
+                    outputSampleRateHz = OUTPUT_SAMPLE_RATE_HZ,
+                    outputChannelCount = OUTPUT_CHANNELS,
+                    bytesPerSample = PCM_BYTES_PER_SAMPLE,
+                )
+        } else {
+            dataSpec.uri.getQueryParameter(DURATION_MS_PARAMETER)
+                ?.toLongOrNull()
+                ?.takeIf { it > 0L }
+                ?.let(::pcmBytesForDuration)
+        }
         val requestedPcmBytePosition = if (pcmDataBytes != null) {
             (dataSpec.position - PcmWavHeader.HEADER_SIZE).coerceAtLeast(0L)
         } else {
@@ -217,15 +228,30 @@ class ApeStreamingDataSource private constructor(
     companion object {
         private const val STREAM_SCHEME = "loudness-ape"
         private const val SOURCE_PARAMETER = "source"
+        private const val FORMAT_PARAMETER = "format"
+        private const val DURATION_MS_PARAMETER = "durationMs"
         private const val OUTPUT_SAMPLE_RATE_HZ = 48_000
         private const val OUTPUT_CHANNELS = 2
         private const val PCM_BYTES_PER_SAMPLE = 2
 
-        fun streamingUri(sourceUri: String): Uri = Uri.Builder()
+        fun streamingUri(
+            sourceUri: String,
+            format: AudioFileFormat,
+            durationMs: Long,
+        ): Uri = Uri.Builder()
             .scheme(STREAM_SCHEME)
             .authority("decode")
             .appendQueryParameter(SOURCE_PARAMETER, sourceUri)
+            .appendQueryParameter(FORMAT_PARAMETER, format.name)
+            .appendQueryParameter(DURATION_MS_PARAMETER, durationMs.toString())
             .build()
+
+        private fun pcmBytesForDuration(durationMs: Long): Long =
+            durationMs
+                .times(OUTPUT_SAMPLE_RATE_HZ)
+                .times(OUTPUT_CHANNELS)
+                .times(PCM_BYTES_PER_SAMPLE)
+                .div(1_000L)
 
         private fun sourceUri(streamingUri: Uri): Uri? {
             if (!streamingUri.scheme.equals(STREAM_SCHEME, ignoreCase = true)) return null

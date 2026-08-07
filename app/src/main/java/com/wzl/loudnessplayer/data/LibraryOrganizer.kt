@@ -204,9 +204,14 @@ private fun String.normalizedIdentityField(): String =
 
 private val AudioFileFormat.importPreference: Int
     get() = when (this) {
-        AudioFileFormat.FLAC -> 4
-        AudioFileFormat.APE -> 3
-        AudioFileFormat.WAV -> 2
+        AudioFileFormat.FLAC -> 9
+        AudioFileFormat.APE -> 8
+        AudioFileFormat.WAV -> 7
+        AudioFileFormat.M4A -> 6
+        AudioFileFormat.OPUS -> 5
+        AudioFileFormat.OGG -> 4
+        AudioFileFormat.AAC -> 3
+        AudioFileFormat.WMA -> 2
         AudioFileFormat.MP3 -> 1
     }
 

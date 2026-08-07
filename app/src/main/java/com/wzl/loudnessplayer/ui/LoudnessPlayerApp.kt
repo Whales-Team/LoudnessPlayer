@@ -217,7 +217,7 @@ fun LoudnessPlayerApp(
                             Column {
                                 Text("响度播放器", fontWeight = FontWeight.SemiBold)
                                 Text(
-                                    "v1.4.0 · APE 时长修复 · 稳定更新",
+                                    "v1.5.0 · 扩展格式 · 锁屏控制",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -1078,7 +1078,7 @@ private fun EmptyLibrary(
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            "支持 MP3、FLAC、WAV、APE；APE 直接实时播放，不生成副本",
+            "支持 MP3、FLAC、WAV、APE、M4A、AAC、OGG、Opus、WMA；不生成转换副本",
             modifier = Modifier.padding(top = 4.dp, bottom = 18.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

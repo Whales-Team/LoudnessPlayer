@@ -89,6 +89,11 @@ class MainActivity : ComponentActivity() {
                             "audio/*",
                             "application/octet-stream",
                             "application/x-ape",
+                            "audio/mp4",
+                            "audio/aac",
+                            "audio/ogg",
+                            "audio/opus",
+                            "audio/x-ms-wma",
                         ),
                     )
                 },

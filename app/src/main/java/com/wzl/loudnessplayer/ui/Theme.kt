@@ -53,6 +53,17 @@ private val BlueColors = lightColorScheme(
     surfaceVariant = Color(0xFFDFE2EB),
 )
 
+private val BrownColors = darkColorScheme(
+    primary = Color(0xFFD6A05E),
+    onPrimary = Color(0xFF3A260F),
+    primaryContainer = Color(0xFF5A4124),
+    onPrimaryContainer = Color(0xFFFFDDB6),
+    secondary = Color(0xFFE1C4A4),
+    secondaryContainer = Color(0xFF59432E),
+    surface = Color(0xFF261B15),
+    surfaceVariant = Color(0xFF51443A),
+)
+
 @Composable
 fun LoudnessPlayerTheme(
     theme: AppTheme,
@@ -63,6 +74,7 @@ fun LoudnessPlayerTheme(
         AppTheme.DARK -> DarkColors
         AppTheme.GREEN -> GreenColors
         AppTheme.BLUE -> BlueColors
+        AppTheme.BROWN -> BrownColors
     }
     MaterialTheme(
         colorScheme = colors,
