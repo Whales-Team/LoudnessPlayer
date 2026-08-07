@@ -14,6 +14,7 @@ Release v1.5.1 with playback-priority loudness analysis, visible failed-analysis
 - FLAC recovery is optional and deliberate: the user selects failed tracks, chooses conversion, confirms the exact original files that may be deleted, then each source is converted, imported as FLAC, and re-analysed. The original is deleted only after both conversion and new loudness analysis succeed.
 - Conversion output is written beside the source when Android grants write access to that location; otherwise the user chooses a writable target folder. No original is removed without a final confirmation.
 - Long press enters multi-select mode. Batch move means add/remove from app-created personal folders; batch delete means remove only the app library records and folder memberships, never delete the phone audio files.
+- Long press also exposes a single-track “edit song information” action. It lets the user edit the displayed song title and artist only; saving immediately refreshes search, alphabetical sorting and smart grouping without writing tags back to the original audio file.
 - The in-app playback bar shows an ordered three-item queue preview: previous, current and next. The Android system media card remains the lock-screen control surface and provides previous, play/pause and next actions.
 - Smart grouping keeps its current shared-title-field behavior and gains a persisted option to group tracks by the same known artist. This is an app display grouping only, not a filesystem directory operation.
 
@@ -50,6 +51,7 @@ Each task uses the existing platform decoder first when supported, then the inte
 - Add a compact analysis control row to the drawer/library header: Start, Stop and Failed (with count).
 - Failed tracks have a status badge and an expandable one-line reason; normal playback actions remain enabled.
 - Long press a `TrackRow` to enter a selection toolbar showing count, “move to folder”, “remove from library”, “convert selected failures”, and Cancel.
+- For a single selected track, the toolbar also offers “edit song information”, opening a compact dialog with title and artist fields and Save/Cancel actions.
 - Add previous/current/next queue previews to the bottom player surface, based on the active global or selected personal-folder queue and honoring shuffle order.
 - Show a compact floating “back to top” button after the active song list has scrolled beyond its first items. It scrolls the current All, Artist, Smart, or Failed list smoothly to the top without changing the selected view or playback queue.
 - Keep the v1.5.0 MediaSessionService and improve its metadata/queue synchronization so the standard Android lock-screen media card reliably stays available while playback is active. No custom overlay is displayed over the lock screen.
