@@ -3,6 +3,7 @@ package com.wzl.loudnessplayer.ui
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,6 +54,8 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -64,6 +68,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -110,7 +115,9 @@ import com.wzl.loudnessplayer.data.LibraryViewMode
 import com.wzl.loudnessplayer.data.MusicFolder
 import com.wzl.loudnessplayer.data.PlaybackMode
 import com.wzl.loudnessplayer.data.groupedByArtist
+import com.wzl.loudnessplayer.data.failedAnalysis
 import com.wzl.loudnessplayer.data.groupedBySimilarTitle
+import com.wzl.loudnessplayer.data.groupedBySmartRule
 import com.wzl.loudnessplayer.data.matchingSearch
 import com.wzl.loudnessplayer.data.sortedByTitleInitial
 import java.util.Locale
@@ -130,10 +137,13 @@ fun LoudnessPlayerApp(
     onNext: () -> Unit,
     onSeek: (Long) -> Unit,
     onNormalizationChanged: (Boolean) -> Unit,
+    onStartAnalysis: () -> Unit,
+    onStopAnalysis: () -> Unit,
     onTargetLoudnessChanged: (Double) -> Unit,
     onPlaybackModeChanged: (PlaybackMode) -> Unit,
     onLibraryViewModeChanged: (LibraryViewMode) -> Unit,
     onSearchQueryChanged: (String) -> Unit,
+    onSameArtistGroupingChanged: (Boolean) -> Unit,
     onThemeChanged: (AppTheme) -> Unit,
     onLyricsOverlayChanged: (Boolean) -> Unit,
     onCreateMusicFolder: (String) -> String?,
@@ -143,6 +153,14 @@ fun LoudnessPlayerApp(
     onLyricsChanged: (String, String) -> Unit,
     onAnalyze: (String) -> Unit,
     onRemove: (String) -> Unit,
+    onTrackLongClick: (String) -> Unit,
+    onClearTrackSelection: () -> Unit,
+    onMoveSelectedToFolder: (String, Boolean) -> Unit,
+    onRemoveSelected: () -> Unit,
+    onEditTrackMetadata: (String, String, String) -> Unit,
+    onRecoverAsFlac: (String) -> Unit,
+    onConfirmDeleteRecoveredOriginal: () -> Unit,
+    onKeepRecoveredOriginal: () -> Unit,
     onMessageConsumed: () -> Unit,
 ) {
     LoudnessPlayerTheme(theme = state.appTheme) {
@@ -154,6 +172,8 @@ fun LoudnessPlayerApp(
         var lyricsTrack by remember { mutableStateOf<AudioTrack?>(null) }
         var folderTrack by remember { mutableStateOf<AudioTrack?>(null) }
         var bulkFolderId by remember { mutableStateOf<String?>(null) }
+        var metadataTrack by remember { mutableStateOf<AudioTrack?>(null) }
+        val listState = rememberLazyListState()
 
         val selectedFolder = state.musicFolders.firstOrNull {
             it.id == state.selectedFolderId
@@ -186,6 +206,8 @@ fun LoudnessPlayerApp(
                         targetDialogVisible = true
                     },
                     onNormalizationChanged = onNormalizationChanged,
+                    onStartAnalysis = onStartAnalysis,
+                    onStopAnalysis = onStopAnalysis,
                     onImportFiles = {
                         coroutineScope.launch { drawerState.close() }
                         onImportFiles()
@@ -217,7 +239,7 @@ fun LoudnessPlayerApp(
                             Column {
                                 Text("响度播放器", fontWeight = FontWeight.SemiBold)
                                 Text(
-                                    "v1.5.0 · 扩展格式 · 锁屏控制",
+                                    "v1.5.1 · 安全校验 · 批量管理",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -237,10 +259,15 @@ fun LoudnessPlayerApp(
                     )
                 },
             ) { paddingValues ->
-                LazyColumn(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues),
+                ) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize(),
                     contentPadding = PaddingValues(
                         start = 16.dp,
                         top = 8.dp,
@@ -256,6 +283,7 @@ fun LoudnessPlayerApp(
                         visibleCount = visibleTracks.size,
                         onSearchQueryChanged = onSearchQueryChanged,
                         onLibraryViewModeChanged = onLibraryViewModeChanged,
+                        onSameArtistGroupingChanged = onSameArtistGroupingChanged,
                         onSelectMusicFolder = onSelectMusicFolder,
                         onCreateFolder = { folderDialogVisible = true },
                         onManageSelectedFolder = {
@@ -265,6 +293,23 @@ fun LoudnessPlayerApp(
                             selectedFolder?.let { onDeleteMusicFolder(it.id) }
                         },
                     )
+                }
+
+                if (state.selectedTrackIds.isNotEmpty()) {
+                    item {
+                        SelectionToolbar(
+                            selectedCount = state.selectedTrackIds.size,
+                            folders = state.musicFolders,
+                            onMoveToFolder = { folderId -> onMoveSelectedToFolder(folderId, true) },
+                            onEdit = {
+                                state.tracks.firstOrNull { it.id in state.selectedTrackIds }?.let {
+                                    metadataTrack = it
+                                }
+                            },
+                            onRemove = onRemoveSelected,
+                            onCancel = onClearTrackSelection,
+                        )
+                    }
                 }
 
                 if (state.tracks.isEmpty()) {
@@ -290,9 +335,13 @@ fun LoudnessPlayerApp(
                                     selected = track.id == state.currentTrackId,
                                     analyzing = track.id in state.analyzingIds,
                                     onClick = { onTrackClick(track.id) },
+                                    onLongClick = { onTrackLongClick(track.id) },
+                                    selectedForBatch = track.id in state.selectedTrackIds,
                                     onAnalyze = { onAnalyze(track.id) },
                                     onEditLyrics = { lyricsTrack = track },
                                     onManageFolders = { folderTrack = track },
+                                    onEditMetadata = { metadataTrack = track },
+                                    onRecoverAsFlac = { onRecoverAsFlac(track.id) },
                                     onRemove = { onRemove(track.id) },
                                 )
                             }
@@ -316,9 +365,13 @@ fun LoudnessPlayerApp(
                                         selected = track.id == state.currentTrackId,
                                         analyzing = track.id in state.analyzingIds,
                                         onClick = { onTrackClick(track.id) },
+                                        onLongClick = { onTrackLongClick(track.id) },
+                                        selectedForBatch = track.id in state.selectedTrackIds,
                                         onAnalyze = { onAnalyze(track.id) },
                                         onEditLyrics = { lyricsTrack = track },
                                         onManageFolders = { folderTrack = track },
+                                        onEditMetadata = { metadataTrack = track },
+                                        onRecoverAsFlac = { onRecoverAsFlac(track.id) },
                                         onRemove = { onRemove(track.id) },
                                     )
                                 }
@@ -326,7 +379,7 @@ fun LoudnessPlayerApp(
                         }
 
                         LibraryViewMode.SMART_TITLE -> {
-                            visibleTracks.groupedBySimilarTitle().forEachIndexed { index, group ->
+                            visibleTracks.groupedBySmartRule(state.groupSameArtistInSmartView).forEachIndexed { index, group ->
                                 item(key = "similar:$index:${group.label}") {
                                     GroupHeader(
                                         label = group.label,
@@ -343,17 +396,51 @@ fun LoudnessPlayerApp(
                                         selected = track.id == state.currentTrackId,
                                         analyzing = track.id in state.analyzingIds,
                                         onClick = { onTrackClick(track.id) },
+                                        onLongClick = { onTrackLongClick(track.id) },
+                                        selectedForBatch = track.id in state.selectedTrackIds,
                                         onAnalyze = { onAnalyze(track.id) },
                                         onEditLyrics = { lyricsTrack = track },
                                         onManageFolders = { folderTrack = track },
+                                        onEditMetadata = { metadataTrack = track },
+                                        onRecoverAsFlac = { onRecoverAsFlac(track.id) },
                                         onRemove = { onRemove(track.id) },
                                     )
                                 }
                             }
                         }
+
+                        LibraryViewMode.FAILED -> {
+                            items(visibleTracks.failedAnalysis(), key = AudioTrack::id) { track ->
+                                TrackRow(
+                                    track = track,
+                                    selected = track.id == state.currentTrackId,
+                                    analyzing = track.id in state.analyzingIds,
+                                    onClick = { onTrackClick(track.id) },
+                                    onLongClick = { onTrackLongClick(track.id) },
+                                    selectedForBatch = track.id in state.selectedTrackIds,
+                                    onAnalyze = { onAnalyze(track.id) },
+                                    onEditLyrics = { lyricsTrack = track },
+                                    onManageFolders = { folderTrack = track },
+                                    onEditMetadata = { metadataTrack = track },
+                                    onRecoverAsFlac = { onRecoverAsFlac(track.id) },
+                                    onRemove = { onRemove(track.id) },
+                                )
+                            }
+                        }
                     }
                 }
             }
+            if (listState.firstVisibleItemIndex > 2) {
+                FloatingActionButton(
+                    onClick = { coroutineScope.launch { listState.animateScrollToItem(0) } },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(20.dp),
+                ) {
+                    Icon(Icons.Default.VerticalAlignTop, contentDescription = "回到顶端")
+                }
+            }
+        }
         }
         }
 
@@ -402,6 +489,27 @@ fun LoudnessPlayerApp(
                 },
             )
         }
+        metadataTrack?.let { track ->
+            MetadataEditorDialog(
+                track = track,
+                onDismiss = { metadataTrack = null },
+                onSave = { title, artist ->
+                    onEditTrackMetadata(track.id, title, artist)
+                    metadataTrack = null
+                },
+            )
+        }
+        state.recoveryDeleteCandidateId?.let { originalId ->
+            state.tracks.firstOrNull { it.id == originalId }?.let { original ->
+                AlertDialog(
+                    onDismissRequest = onKeepRecoveredOriginal,
+                    title = { Text("FLAC 已转换并校验成功") },
+                    text = { Text("是否删除原文件“${original.title}”？只有现在确认才会删除手机中的原文件。") },
+                    confirmButton = { Button(onClick = onConfirmDeleteRecoveredOriginal) { Text("删除原文件") } },
+                    dismissButton = { TextButton(onClick = onKeepRecoveredOriginal) { Text("保留原文件") } },
+                )
+            }
+        }
         bulkFolderId?.let { folderId ->
             state.musicFolders.firstOrNull { it.id == folderId }?.let { folder ->
                 FolderTrackPickerDialog(
@@ -423,6 +531,8 @@ private fun SettingsDrawer(
     onClose: () -> Unit,
     onConfigureLoudness: () -> Unit,
     onNormalizationChanged: (Boolean) -> Unit,
+    onStartAnalysis: () -> Unit,
+    onStopAnalysis: () -> Unit,
     onImportFiles: () -> Unit,
     onImportFolder: () -> Unit,
     onScanDevice: () -> Unit,
@@ -476,6 +586,8 @@ private fun SettingsDrawer(
                 analyzingCount = state.analyzingIds.size,
                 onEnabledChanged = onNormalizationChanged,
                 onConfigure = onConfigureLoudness,
+                onStartAnalysis = onStartAnalysis,
+                onStopAnalysis = onStopAnalysis,
             )
 
             Text(
@@ -622,6 +734,8 @@ private fun NormalizationCard(
     analyzingCount: Int,
     onEnabledChanged: (Boolean) -> Unit,
     onConfigure: () -> Unit,
+    onStartAnalysis: () -> Unit,
+    onStopAnalysis: () -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -683,6 +797,13 @@ private fun NormalizationCard(
                 onCheckedChange = onEnabledChanged,
             )
         }
+        Row(
+            modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilledTonalButton(onClick = onStartAnalysis) { Text("开始校验") }
+            TextButton(onClick = onStopAnalysis, enabled = analyzingCount > 0) { Text("停止校验") }
+        }
     }
 }
 
@@ -693,6 +814,7 @@ private fun LibraryControls(
     visibleCount: Int,
     onSearchQueryChanged: (String) -> Unit,
     onLibraryViewModeChanged: (LibraryViewMode) -> Unit,
+    onSameArtistGroupingChanged: (Boolean) -> Unit,
     onSelectMusicFolder: (String?) -> Unit,
     onCreateFolder: () -> Unit,
     onManageSelectedFolder: () -> Unit,
@@ -732,6 +854,22 @@ private fun LibraryControls(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                 )
+            }
+            if (state.libraryViewMode == LibraryViewMode.SMART_TITLE) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "同歌手也归类",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Switch(
+                        checked = state.groupSameArtistInSmartView,
+                        onCheckedChange = onSameArtistGroupingChanged,
+                    )
+                }
             }
             OutlinedTextField(
                 value = state.searchQuery,
@@ -878,18 +1016,25 @@ private fun GroupHeader(
 }
 
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun TrackRow(
     track: AudioTrack,
     selected: Boolean,
     analyzing: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    selectedForBatch: Boolean,
     onAnalyze: () -> Unit,
     onEditLyrics: () -> Unit,
     onManageFolders: () -> Unit,
+    onEditMetadata: () -> Unit,
+    onRecoverAsFlac: () -> Unit,
     onRemove: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val container = if (selected) {
+    val container = if (selectedForBatch) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else if (selected) {
         MaterialTheme.colorScheme.secondaryContainer
     } else {
         MaterialTheme.colorScheme.surface
@@ -898,7 +1043,7 @@ private fun TrackRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         colors = CardDefaults.cardColors(containerColor = container),
         shape = RoundedCornerShape(18.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 0.dp else 1.dp),
@@ -970,6 +1115,24 @@ private fun TrackRow(
                     onDismissRequest = { menuExpanded = false },
                 ) {
                     DropdownMenuItem(
+                        text = { Text("编辑歌曲名称和歌手") },
+                        leadingIcon = { Icon(Icons.Default.Edit, null) },
+                        onClick = {
+                            menuExpanded = false
+                            onEditMetadata()
+                        },
+                    )
+                    if (track.analysisStatus == com.wzl.loudnessplayer.data.AnalysisStatus.FAILED) {
+                        DropdownMenuItem(
+                            text = { Text("转换为 FLAC 后重新校验") },
+                            leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
+                            onClick = {
+                                menuExpanded = false
+                                onRecoverAsFlac()
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
                         text = { Text("编辑/粘贴歌词（支持 LRC）") },
                         leadingIcon = { Icon(Icons.Default.Subtitles, null) },
                         onClick = {
@@ -1014,6 +1177,90 @@ private fun TrackRow(
             }
         }
     }
+}
+
+@Composable
+private fun SelectionToolbar(
+    selectedCount: Int,
+    folders: List<MusicFolder>,
+    onMoveToFolder: (String) -> Unit,
+    onEdit: () -> Unit,
+    onRemove: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    var folderMenuExpanded by remember { mutableStateOf(false) }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        shape = RoundedCornerShape(18.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text("已选择 $selectedCount 首歌曲", fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box {
+                    FilledTonalButton(onClick = { folderMenuExpanded = true }, enabled = folders.isNotEmpty()) {
+                        Icon(Icons.Default.Folder, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("移至文件夹")
+                    }
+                    DropdownMenu(folderMenuExpanded, onDismissRequest = { folderMenuExpanded = false }) {
+                        folders.forEach { folder ->
+                            DropdownMenuItem(
+                                text = { Text(folder.name) },
+                                onClick = {
+                                    folderMenuExpanded = false
+                                    onMoveToFolder(folder.id)
+                                },
+                            )
+                        }
+                    }
+                }
+                if (selectedCount == 1) {
+                    TextButton(onClick = onEdit) {
+                        Icon(Icons.Default.Edit, null)
+                        Text("编辑")
+                    }
+                }
+                TextButton(onClick = onRemove) {
+                    Icon(Icons.Default.DeleteOutline, null)
+                    Text("移除")
+                }
+                TextButton(onClick = onCancel) { Text("取消") }
+            }
+            Text(
+                "移除只影响应用音乐库，不会删除手机中的原音频文件。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MetadataEditorDialog(
+    track: AudioTrack,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var title by remember(track.id) { mutableStateOf(track.title) }
+    var artist by remember(track.id) { mutableStateOf(track.artist) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑显示信息") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(title, { title = it }, label = { Text("歌曲名称") }, singleLine = true)
+                OutlinedTextField(artist, { artist = it }, label = { Text("歌手名称") }, singleLine = true)
+                Text(
+                    "仅修改本应用内的显示、搜索和分类，不会改动原音频文件标签。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = { Button(onClick = { onSave(title, artist) }) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 @Composable
@@ -1131,6 +1378,8 @@ private fun NowPlayingBar(
     onPlaybackModeChanged: (PlaybackMode) -> Unit,
 ) {
     val currentTrack = state.tracks.firstOrNull { it.id == state.currentTrackId }
+    val previousTrack = state.tracks.firstOrNull { it.id == state.previousTrackId }
+    val nextTrack = state.tracks.firstOrNull { it.id == state.nextTrackId }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1139,6 +1388,30 @@ private fun NowPlayingBar(
     ) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         if (currentTrack != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "上一首：${previousTrack?.title ?: "无"}",
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "下一首：${nextTrack?.title ?: "无"}",
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Slider(
                 value = state.positionMs.toFloat().coerceAtMost(state.durationMs.toFloat()),
                 onValueChange = { onSeek(it.roundToLong()) },

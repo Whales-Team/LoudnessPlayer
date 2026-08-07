@@ -6,6 +6,26 @@ import org.junit.Test
 
 class LibraryOrganizerTest {
     @Test
+    fun filtersTracksWhoseLastLoudnessAttemptFailed() {
+        val tracks = listOf(
+            track("failed", "Artist", "Failed").copy(analysisStatus = AnalysisStatus.FAILED),
+            track("success", "Artist", "Success").copy(analysisStatus = AnalysisStatus.SUCCESS),
+        )
+
+        assertEquals(listOf("failed"), tracks.failedAnalysis().map { it.id })
+    }
+
+    @Test
+    fun editsDisplayMetadataWithoutChangingTheSourceUri() {
+        val original = track("song", "Old Artist", "Old Title")
+
+        val edited = original.withEditedMetadata(" New Title ", " New Artist ")
+
+        assertEquals("New Title", edited.title)
+        assertEquals("New Artist", edited.artist)
+        assertEquals(original.uri, edited.uri)
+    }
+    @Test
     fun groupsArtistsAlphabeticallyAndPlacesUnknownLast() {
         val tracks = listOf(
             track("3", "未知艺术家", "Unknown"),
@@ -46,6 +66,19 @@ class LibraryOrganizerTest {
         assertEquals(setOf("1", "2"), similarGroup.tracks.map { it.id }.toSet())
         assertTrue(similarGroup.matchingFields.size >= 2)
         assertEquals("其他歌曲", groups.last().label)
+    }
+
+    @Test
+    fun smartRuleCanGroupTracksWithTheSameKnownArtist() {
+        val tracks = listOf(
+            track("1", "Singer", "Morning"),
+            track("2", "Singer", "Evening"),
+        )
+
+        val groups = tracks.groupedBySmartRule(groupSameArtist = true)
+
+        assertEquals(1, groups.size)
+        assertEquals(setOf("1", "2"), groups.single().tracks.map { it.id }.toSet())
     }
 
     @Test

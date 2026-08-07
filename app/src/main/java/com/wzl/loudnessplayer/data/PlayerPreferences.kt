@@ -13,6 +13,7 @@ enum class LibraryViewMode(val displayName: String) {
     ALL("全部歌曲"),
     ARTIST("按歌手分类"),
     SMART_TITLE("按歌曲名智能分类"),
+    FAILED("校验失败"),
 }
 
 enum class AppTheme(val displayName: String) {

@@ -37,6 +37,15 @@ class TrackRepository(context: Context) {
                             loudnessLufs = item.optNullableDouble("loudnessLufs"),
                             samplePeakDbfs = item.optNullableDouble("samplePeakDbfs"),
                             lyrics = item.optNullableString("lyrics"),
+                            analysisStatus = item.optString("analysisStatus")
+                                .takeIf(String::isNotBlank)
+                                ?.let { saved -> runCatching { AnalysisStatus.valueOf(saved) }.getOrNull() }
+                                ?: if (item.optNullableDouble("loudnessLufs") != null) {
+                                    AnalysisStatus.SUCCESS
+                                } else {
+                                    AnalysisStatus.PENDING
+                                },
+                            analysisFailureMessage = item.optNullableString("analysisFailureMessage"),
                         ),
                     )
                 }
@@ -58,6 +67,8 @@ class TrackRepository(context: Context) {
                     put("loudnessLufs", track.loudnessLufs ?: JSONObject.NULL)
                     put("samplePeakDbfs", track.samplePeakDbfs ?: JSONObject.NULL)
                     put("lyrics", track.lyrics ?: JSONObject.NULL)
+                    put("analysisStatus", track.analysisStatus.name)
+                    put("analysisFailureMessage", track.analysisFailureMessage ?: JSONObject.NULL)
                 },
             )
         }
@@ -99,6 +110,12 @@ class TrackRepository(context: Context) {
 
     fun setLibraryViewMode(mode: LibraryViewMode) {
         preferences.edit().putString(KEY_LIBRARY_VIEW_MODE, mode.name).apply()
+    }
+
+    fun isSameArtistGroupingEnabled(): Boolean = preferences.getBoolean(KEY_SAME_ARTIST_GROUPING, false)
+
+    fun setSameArtistGroupingEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_SAME_ARTIST_GROUPING, enabled).apply()
     }
 
     fun playbackMode(): PlaybackMode =
@@ -287,6 +304,7 @@ class TrackRepository(context: Context) {
         const val KEY_TRACKS = "tracks"
         const val KEY_NORMALIZATION_ENABLED = "normalization_enabled"
         const val KEY_GROUP_BY_ARTIST = "group_by_artist"
+        const val KEY_SAME_ARTIST_GROUPING = "same_artist_grouping"
         const val KEY_TARGET_LOUDNESS_LUFS = "target_loudness_lufs"
         const val KEY_LIBRARY_VIEW_MODE = "library_view_mode"
         const val KEY_PLAYBACK_MODE = "playback_mode"

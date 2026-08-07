@@ -14,11 +14,14 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.documentfile.provider.DocumentFile
 import com.wzl.loudnessplayer.audio.ApeLoudnessAnalyzer
 import com.wzl.loudnessplayer.audio.ApeStreamingDataSource
+import com.wzl.loudnessplayer.audio.FlacRecoveryConverter
 import com.wzl.loudnessplayer.audio.LoudnessAnalyzer
 import com.wzl.loudnessplayer.audio.Normalization
 import com.wzl.loudnessplayer.data.AppTheme
+import com.wzl.loudnessplayer.data.AnalysisStatus
 import com.wzl.loudnessplayer.data.AudioFileFormat
 import com.wzl.loudnessplayer.data.DecoderPath
 import com.wzl.loudnessplayer.data.AudioLibraryScanner
@@ -29,12 +32,14 @@ import com.wzl.loudnessplayer.data.PlaybackMode
 import com.wzl.loudnessplayer.data.TrackRepository
 import com.wzl.loudnessplayer.data.selectUniqueImports
 import com.wzl.loudnessplayer.data.sortedByTitleInitial
+import com.wzl.loudnessplayer.data.withEditedMetadata
 import com.wzl.loudnessplayer.lyrics.LrcParser
 import com.wzl.loudnessplayer.lyrics.LyricsOverlayService
 import com.wzl.loudnessplayer.lyrics.TimedLyricLine
 import com.wzl.loudnessplayer.playback.PlaybackScope
 import com.wzl.loudnessplayer.playback.LoudnessPlaybackService
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,6 +55,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val libraryScanner = AudioLibraryScanner(application, repository)
     private val analyzer = LoudnessAnalyzer(application)
     private val apeAnalyzer = ApeLoudnessAnalyzer(application)
+    private val flacRecoveryConverter = FlacRecoveryConverter(application)
     private val player = LoudnessPlaybackService.player(application)
 
     private val _uiState = MutableStateFlow(
@@ -61,6 +67,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             playbackMode = repository.playbackMode(),
             appTheme = repository.appTheme(),
             musicFolders = repository.loadMusicFolders(),
+            groupSameArtistInSmartView = repository.isSameArtistGroupingEnabled(),
             lyricsOverlayEnabled = repository.isLyricsOverlayEnabled() &&
                 Settings.canDrawOverlays(application),
         ),
@@ -70,6 +77,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val pendingAnalysisIds = linkedSetOf<String>()
     private var loudnessEnhancer: LoudnessEnhancer? = null
     private var analysisJob: Job? = null
+    private var analysisStoppedByUser = false
     private var volumeRampJob: Job? = null
     private var cachedLyricsTrackId: String? = null
     private var cachedTimedLyrics: List<TimedLyricLine> = emptyList()
@@ -80,6 +88,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _uiState.update { it.copy(isPlaying = isPlaying) }
+                    if (isPlaying) {
+                        pauseAnalysisForPlayback()
+                    } else if (!analysisStoppedByUser) {
+                        resumePendingAnalysis()
+                    }
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -291,6 +304,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         queueAnalysis(listOf(trackId))
     }
 
+    fun startAnalysis() {
+        analysisStoppedByUser = false
+        queueMissingLoudnessAnalysis()
+    }
+
+    fun stopAnalysis() {
+        analysisStoppedByUser = true
+        pendingAnalysisIds += _uiState.value.analyzingIds
+        analysisJob?.cancel()
+        analysisJob = null
+        _uiState.update { it.copy(analyzingIds = emptySet()) }
+    }
+
     fun setPlaybackMode(mode: PlaybackMode) {
         repository.setPlaybackMode(mode)
         _uiState.update { it.copy(playbackMode = mode) }
@@ -309,6 +335,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setSearchQuery(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
+    }
+
+    fun setSameArtistGrouping(enabled: Boolean) {
+        repository.setSameArtistGroupingEnabled(enabled)
+        _uiState.update { it.copy(groupSameArtistInSmartView = enabled) }
     }
 
     fun setAppTheme(theme: AppTheme) {
@@ -412,6 +443,76 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         showMessage(if (cleanedLyrics == null) "已清除歌词" else "歌词已保存")
     }
 
+    fun editTrackMetadata(trackId: String, title: String, artist: String) {
+        if (_uiState.value.tracks.none { it.id == trackId }) return
+        _uiState.update { state ->
+            state.copy(tracks = state.tracks.map { track ->
+                if (track.id == trackId) track.withEditedMetadata(title, artist) else track
+            }.sortedByTitleInitial())
+        }
+        persistTracks()
+        syncPlayerQueue(autoPlay = false)
+        showMessage("歌曲名称和歌手信息已更新")
+    }
+
+    fun toggleTrackSelection(trackId: String) {
+        if (_uiState.value.tracks.none { it.id == trackId }) return
+        _uiState.update { state ->
+            state.copy(
+                selectedTrackIds = if (trackId in state.selectedTrackIds) {
+                    state.selectedTrackIds - trackId
+                } else {
+                    state.selectedTrackIds + trackId
+                },
+            )
+        }
+    }
+
+    fun clearTrackSelection() {
+        _uiState.update { it.copy(selectedTrackIds = emptySet()) }
+    }
+
+    fun moveSelectedToFolder(folderId: String, included: Boolean) {
+        val selectedIds = _uiState.value.selectedTrackIds
+        if (selectedIds.isEmpty() || _uiState.value.musicFolders.none { it.id == folderId }) return
+        _uiState.update { state ->
+            state.copy(
+                musicFolders = state.musicFolders.map { folder ->
+                    if (folder.id == folderId) folder.copy(
+                        trackIds = if (included) folder.trackIds + selectedIds else folder.trackIds - selectedIds,
+                    ) else folder
+                },
+                selectedTrackIds = emptySet(),
+            )
+        }
+        persistMusicFolders()
+        syncPlayerQueue(autoPlay = false)
+        showMessage(if (included) "已加入个人文件夹" else "已从个人文件夹移出")
+    }
+
+    /** Removes records and personal-folder membership only. Source audio files are never deleted. */
+    fun removeSelectedFromLibrary() {
+        val selectedIds = _uiState.value.selectedTrackIds
+        if (selectedIds.isEmpty()) return
+        val removedCurrent = _uiState.value.currentTrackId in selectedIds
+        pendingAnalysisIds.removeAll(selectedIds)
+        _uiState.update { state ->
+            state.copy(
+                tracks = state.tracks.filterNot { it.id in selectedIds },
+                analyzingIds = state.analyzingIds - selectedIds,
+                selectedTrackIds = emptySet(),
+                currentTrackId = if (removedCurrent) null else state.currentTrackId,
+                musicFolders = state.musicFolders.map { folder ->
+                    folder.copy(trackIds = folder.trackIds - selectedIds)
+                },
+            )
+        }
+        persistTracks()
+        persistMusicFolders()
+        syncPlayerQueue(autoPlay = false)
+        showMessage("已从应用音乐库移除 ${selectedIds.size} 首歌曲；手机原文件未删除")
+    }
+
     fun enableLyricsOverlay() {
         if (!Settings.canDrawOverlays(appContext)) {
             showMessage("请先允许“显示在其他应用上层”权限")
@@ -470,13 +571,88 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         syncPlayerQueue(autoPlay = false)
     }
 
+    fun recoverFailedTrackAsFlac(trackId: String, destinationTree: Uri) {
+        val original = _uiState.value.tracks.firstOrNull { it.id == trackId } ?: return
+        if (original.analysisStatus != AnalysisStatus.FAILED) return
+        viewModelScope.launch {
+            val root = DocumentFile.fromTreeUri(appContext, destinationTree)
+            val fileName = original.title.ifBlank { "recovered-audio" }
+                .replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".flac"
+            val destination = root?.createFile("audio/flac", fileName)
+            if (destination == null) {
+                showMessage("无法在所选文件夹创建 FLAC 文件，原文件未修改")
+                return@launch
+            }
+            showMessage("正在转换为 FLAC 并校验响度，不会影响当前播放")
+            val conversion = flacRecoveryConverter.convert(Uri.parse(original.uri), destination.uri)
+            if (!conversion.isSuccess) {
+                runCatching { appContext.contentResolver.delete(destination.uri, null, null) }
+                showMessage("转换失败，原文件已保留")
+                return@launch
+            }
+            val recovered = runCatching { repository.createTrack(destination.uri) }.getOrNull()
+            if (recovered == null) {
+                showMessage("FLAC 已生成但无法导入，原文件已保留")
+                return@launch
+            }
+            val result = runCatching { analyzer.analyze(destination.uri) }.getOrElse {
+                runCatching { apeAnalyzer.analyze(destination.uri, "FLAC") }.getOrElse { error ->
+                    _uiState.update { state -> state.copy(
+                        tracks = state.tracks.map { track ->
+                            if (track.id == original.id) track.copy(
+                                analysisStatus = AnalysisStatus.FAILED,
+                                analysisFailureMessage = error.message?.take(160),
+                            ) else track
+                        },
+                    ) }
+                    persistTracks()
+                    showMessage("FLAC 转换完成但响度校验失败；原文件未删除")
+                    return@launch
+                }
+            }
+            val completed = recovered.copy(
+                loudnessLufs = result.integratedLufs,
+                samplePeakDbfs = result.samplePeakDbfs,
+                analysisStatus = AnalysisStatus.SUCCESS,
+            )
+            _uiState.update { state ->
+                state.copy(
+                    tracks = (state.tracks + completed).sortedByTitleInitial(),
+                    recoveryDeleteCandidateId = original.id,
+                )
+            }
+            persistTracks()
+        }
+    }
+
+    /** Invoked only after the final confirmation dialog. A failed provider delete keeps the record. */
+    fun confirmDeleteRecoveredOriginal() {
+        val originalId = _uiState.value.recoveryDeleteCandidateId ?: return
+        val original = _uiState.value.tracks.firstOrNull { it.id == originalId } ?: return
+        val deleted = runCatching {
+            appContext.contentResolver.delete(Uri.parse(original.uri), null, null) > 0
+        }.getOrDefault(false)
+        if (deleted) {
+            removeTrack(originalId)
+            showMessage("已删除原文件，已保留并校验新的 FLAC 文件")
+        } else {
+            showMessage("未能删除原文件；新的 FLAC 已保留")
+        }
+        _uiState.update { it.copy(recoveryDeleteCandidateId = null) }
+    }
+
+    fun keepRecoveredOriginal() {
+        _uiState.update { it.copy(recoveryDeleteCandidateId = null) }
+        showMessage("已保留原文件和新的 FLAC 文件")
+    }
+
     fun consumeMessage() {
         _uiState.update { it.copy(message = null) }
     }
 
     private fun queueMissingLoudnessAnalysis(): Int {
         val missingIds = _uiState.value.tracks
-            .filter { it.format.supportsLoudnessAnalysis && it.loudnessLufs == null }
+            .filter { it.format.supportsLoudnessAnalysis && it.analysisStatus != AnalysisStatus.SUCCESS }
             .map(AudioTrack::id)
         queueAnalysis(missingIds)
         return missingIds.size
@@ -493,6 +669,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         if (validIds.isEmpty()) return
         pendingAnalysisIds += validIds
         _uiState.update { it.copy(analyzingIds = it.analyzingIds + validIds) }
+        if (player.isPlaying || analysisStoppedByUser) return
         if (analysisJob?.isActive == true) return
 
         analysisJob = viewModelScope.launch {
@@ -523,6 +700,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                                         it.copy(
                                             loudnessLufs = result.integratedLufs,
                                             samplePeakDbfs = result.samplePeakDbfs,
+                                            analysisStatus = AnalysisStatus.SUCCESS,
+                                            analysisFailureMessage = null,
                                         )
                                     } else {
                                         it
@@ -536,7 +715,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                     .onFailure { error ->
+                        if (error is CancellationException) return@onFailure
                         val detail = error.message?.take(100)
+                        _uiState.update { state ->
+                            state.copy(tracks = state.tracks.map {
+                                if (it.id == trackId) {
+                                    it.copy(
+                                        analysisStatus = AnalysisStatus.FAILED,
+                                        analysisFailureMessage = detail,
+                                    )
+                                } else it
+                            })
+                        }
+                        persistTracks()
                         showMessage(
                             "“${track.title}”响度分析失败" +
                                 if (detail == null) "" else "：$detail",
@@ -547,6 +738,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+    }
+
+    private fun pauseAnalysisForPlayback() {
+        if (analysisJob?.isActive != true) return
+        pendingAnalysisIds += _uiState.value.analyzingIds
+        analysisJob?.cancel()
+        analysisJob = null
+        _uiState.update { it.copy(analyzingIds = emptySet()) }
+    }
+
+    private fun resumePendingAnalysis() {
+        if (pendingAnalysisIds.isEmpty()) return
+        queueAnalysis(pendingAnalysisIds.toList())
     }
 
     private fun syncPlayerQueue(autoPlay: Boolean) {
@@ -638,9 +842,17 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 isPlaying = player.isPlaying,
                 positionMs = player.currentPosition.coerceAtLeast(0L),
                 durationMs = safeDuration,
+                previousTrackId = player.trackIdAt(player.previousMediaItemIndex),
+                nextTrackId = player.trackIdAt(player.nextMediaItemIndex),
             )
         }
     }
+
+    private fun Player.trackIdAt(index: Int): String? =
+        index.takeIf { it != C.INDEX_UNSET && it in 0 until mediaItemCount }
+            ?.let { getMediaItemAt(it) }
+            ?.mediaId
+            ?.takeIf(String::isNotEmpty)
 
     private fun refreshApeDurations() {
         viewModelScope.launch {
@@ -778,6 +990,11 @@ data class PlayerUiState(
     val musicFolders: List<MusicFolder> = emptyList(),
     val selectedFolderId: String? = null,
     val searchQuery: String = "",
+    val groupSameArtistInSmartView: Boolean = false,
+    val selectedTrackIds: Set<String> = emptySet(),
+    val previousTrackId: String? = null,
+    val nextTrackId: String? = null,
+    val recoveryDeleteCandidateId: String? = null,
     val lyricsOverlayEnabled: Boolean = false,
     val appliedGainDb: Double = 0.0,
     val analyzingIds: Set<String> = emptySet(),
