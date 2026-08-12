@@ -23,12 +23,11 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: Sources
-    info:
-      path: Config/App-Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wzl.loudnessplayer.ios
         PRODUCT_NAME: LoudnessPlayer
+        INFOPLIST_FILE: Config/App-Info.plist
         CODE_SIGNING_ALLOWED: NO
     dependencies:
       - target: LoudnessPlayerWidget
@@ -40,12 +39,11 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: Widget
-    info:
-      path: Config/Widget-Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wzl.loudnessplayer.ios.widget
         PRODUCT_NAME: LoudnessPlayerWidget
+        INFOPLIST_FILE: Config/Widget-Info.plist
         SKIP_INSTALL: YES
         CODE_SIGNING_ALLOWED: NO
 
