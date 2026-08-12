@@ -13,6 +13,10 @@ struct PlaybackQueue: Sendable {
         } else { tracks = scope }
     }
 
+    init(tracks: [AudioTrack], mode: PlaybackMode, seed: UInt64 = 0) {
+        self.init(scope: tracks, mode: mode, seed: seed)
+    }
+
     var preview: QueuePreview {
         guard tracks.indices.contains(index) else { return QueuePreview(previous: nil, current: nil, next: nil) }
         if mode == .repeatOne {
