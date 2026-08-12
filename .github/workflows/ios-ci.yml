@@ -49,6 +49,31 @@ jobs:
           echo "/tmp/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
           /tmp/xcodegen/xcodegen/bin/xcodegen --version | grep '2.46.0'
 
+      - name: Install matching iOS simulator runtime
+        run: |
+          set -euo pipefail
+          if ! xcrun simctl list runtimes --json | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          raise SystemExit(0 if any(item.get("isAvailable") for item in data["runtimes"] if item["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")) else 1)
+          '; then
+            xcodebuild -downloadPlatform iOS
+          fi
+
+          runtime_id="$(xcrun simctl list runtimes --json | python3 -c '
+          import json, sys
+          items = [item for item in json.load(sys.stdin)["runtimes"] if item.get("isAvailable") and item["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]
+          print(items[-1]["identifier"])
+          ')"
+          device_type="$(xcrun simctl list devicetypes --json | python3 -c '
+          import json, sys
+          items = json.load(sys.stdin)["devicetypes"]
+          preferred = next((item for item in items if item["name"] == "iPhone 16 Pro"), None)
+          print((preferred or next(item for item in reversed(items) if item["name"].startswith("iPhone")))["identifier"])
+          ')"
+          xcrun simctl create "LoudnessPlayer CI" "$device_type" "$runtime_id"
+          xcrun simctl list devices available
+
       - name: Run tests and build
         working-directory: ios/LoudnessPlayerIOS
         run: |

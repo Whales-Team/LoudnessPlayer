@@ -10,7 +10,7 @@ set -o pipefail
 xcodebuild test \
   -project LoudnessPlayerIOS.xcodeproj \
   -scheme LoudnessPlayer \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest' \
+  -destination "${IOS_TEST_DESTINATION:-platform=iOS Simulator,name=LoudnessPlayer CI}" \
   CODE_SIGNING_ALLOWED=NO \
   | tee build/test.log
 
