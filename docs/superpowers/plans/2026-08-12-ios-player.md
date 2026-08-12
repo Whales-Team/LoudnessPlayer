@@ -262,7 +262,7 @@ actor LibraryStore {
 }
 ```
 
-Write `library.next.json` using `.atomic`, rotate the valid current file to `library.previous.json`, then replace current. Bookmark creation uses `.withSecurityScope`; resolution uses `.withSecurityScope` and detects `bookmarkDataIsStale`. A stale result keeps the track and returns `.reauthorizationRequired` to the caller.
+Write `library.next.json` using `.atomic`, rotate the valid current file to `library.previous.json`, then replace current. On iOS, bookmark creation uses `.minimalBookmark`; resolution uses `.withoutUI` and detects `bookmarkDataIsStale`, while actual access remains balanced through `startAccessingSecurityScopedResource` and `stopAccessingSecurityScopedResource`. A stale result keeps the track and returns `.reauthorizationRequired` to the caller.
 
 - [ ] **Step 4: Run focused and complete tests, then commit**
 

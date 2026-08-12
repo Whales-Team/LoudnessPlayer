@@ -34,7 +34,7 @@ Defines `AudioTrack`, `AudioFormat`, `AnalysisStatus`, `PlaybackMode`, `LibraryV
 
 ### Library
 
-`LibraryStore` persists one versioned JSON document in Application Support. It stores tracks, security-scoped bookmarks, display-only title/artist edits, loudness values, lyrics, personal folders, and preferences. Source audio bytes are not copied into the app container.
+`LibraryStore` persists one versioned JSON document in Application Support. It stores tracks, persistent bookmarks for document-picker security-scoped URLs, display-only title/artist edits, loudness values, lyrics, personal folders, and preferences. Source audio bytes are not copied into the app container.
 
 `FileImporter` supports multiple documents and directory selection through the Files app. It recursively enumerates a user-selected folder while security access is active, creates bookmarks, reads metadata, filters supported extensions, and performs cross-format duplicate detection. Existing library records win; otherwise lossless formats are preferred. If a bookmark becomes stale or a file moves, the record remains visible and prompts for reauthorization instead of disappearing.
 

@@ -41,7 +41,7 @@ struct BookmarkResolver: BookmarkResolving {
         var isStale = false
         let url = try URL(
             resolvingBookmarkData: bookmark,
-            options: [.withSecurityScope, .withoutUI],
+            options: [.withoutUI],
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         )
