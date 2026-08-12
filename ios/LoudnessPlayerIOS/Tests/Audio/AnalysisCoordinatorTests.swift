@@ -14,7 +14,8 @@ final class AnalysisCoordinatorTests: XCTestCase {
         await coordinator.start(tracks: [succeeded])
         await coordinator.waitUntilIdle()
 
-        XCTAssertEqual(await probe.startedIDs(), [])
+        let started = await probe.startedIDs()
+        XCTAssertEqual(started, [])
     }
 
     func testUsesAtMostTwoConcurrentAnalysisJobs() async {
@@ -27,7 +28,8 @@ final class AnalysisCoordinatorTests: XCTestCase {
         await coordinator.start(tracks: (0..<6).map { _ in analysisTrack() })
         await coordinator.waitUntilIdle()
 
-        XCTAssertEqual(await probe.maximumConcurrency(), 2)
+        let maximum = await probe.maximumConcurrency()
+        XCTAssertEqual(maximum, 2)
     }
 
     func testPlaybackStartCancelsActiveAnalysisAndLeavesPending() async {
@@ -44,8 +46,10 @@ final class AnalysisCoordinatorTests: XCTestCase {
         await coordinator.playbackDidStart()
         await coordinator.waitUntilIdle()
 
-        XCTAssertTrue(await probe.wasCancelled())
-        XCTAssertEqual(await updates.statuses(), [.pending, .pending])
+        let wasCancelled = await probe.wasCancelled()
+        let statuses = await updates.statuses()
+        XCTAssertTrue(wasCancelled)
+        XCTAssertEqual(statuses, [.pending, .pending])
     }
 }
 
