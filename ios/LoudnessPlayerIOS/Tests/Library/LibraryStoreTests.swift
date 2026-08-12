@@ -13,8 +13,9 @@ final class LibraryStoreTests: XCTestCase {
         )
 
         try await store.save(document)
+        let loaded = try await store.load()
 
-        XCTAssertEqual(try await store.load(), document)
+        XCTAssertEqual(loaded, document)
     }
 
     func testMigratesSchemaZeroDefaultsWithoutLosingTracks() async throws {
@@ -58,7 +59,8 @@ final class LibraryStoreTests: XCTestCase {
     }
 
     func testReturnsEmptyDocumentWhenNoLibraryExists() async throws {
-        XCTAssertEqual(try await LibraryStore(directory: temporaryDirectory()).load(), .empty)
+        let loaded = try await LibraryStore(directory: temporaryDirectory()).load()
+        XCTAssertEqual(loaded, .empty)
     }
 
     private func temporaryDirectory() throws -> URL {
