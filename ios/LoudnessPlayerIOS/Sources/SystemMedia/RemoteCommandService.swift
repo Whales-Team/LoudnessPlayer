@@ -24,10 +24,10 @@ final class RemoteCommandService {
         shutdown()
         self.actions = actions
         guard let commandCenter else { return }
-        register(commandCenter.playCommand) { [weak self] _ in self?.perform(.play) }
-        register(commandCenter.pauseCommand) { [weak self] _ in self?.perform(.pause) }
-        register(commandCenter.nextTrackCommand) { [weak self] _ in self?.perform(.next) }
-        register(commandCenter.previousTrackCommand) { [weak self] _ in self?.perform(.previous) }
+        register(commandCenter.playCommand) { [weak self] _ in self?.perform(.play) ?? .commandFailed }
+        register(commandCenter.pauseCommand) { [weak self] _ in self?.perform(.pause) ?? .commandFailed }
+        register(commandCenter.nextTrackCommand) { [weak self] _ in self?.perform(.next) ?? .commandFailed }
+        register(commandCenter.previousTrackCommand) { [weak self] _ in self?.perform(.previous) ?? .commandFailed }
         register(commandCenter.changePlaybackPositionCommand) { [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             self?.actions?.seek(event.positionTime)
