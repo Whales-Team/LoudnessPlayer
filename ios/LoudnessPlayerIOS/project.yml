@@ -1,0 +1,78 @@
+name: LoudnessPlayerIOS
+
+options:
+  bundleIdPrefix: com.wzl.loudnessplayer.ios
+  deploymentTarget:
+    iOS: "16.0"
+  developmentLanguage: zh-Hans
+  xcodeVersion: "16.4"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    GENERATE_INFOPLIST_FILE: NO
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+
+targets:
+  LoudnessPlayer:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: Sources
+    info:
+      path: Config/App-Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wzl.loudnessplayer.ios
+        PRODUCT_NAME: LoudnessPlayer
+        CODE_SIGNING_ALLOWED: NO
+    dependencies:
+      - target: LoudnessPlayerWidget
+        embed: true
+
+  LoudnessPlayerWidget:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: Widget
+    info:
+      path: Config/Widget-Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wzl.loudnessplayer.ios.widget
+        PRODUCT_NAME: LoudnessPlayerWidget
+        SKIP_INSTALL: YES
+        CODE_SIGNING_ALLOWED: NO
+
+  LoudnessPlayerTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: Tests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wzl.loudnessplayer.ios.tests
+        CODE_SIGNING_ALLOWED: NO
+    dependencies:
+      - target: LoudnessPlayer
+
+schemes:
+  LoudnessPlayer:
+    build:
+      targets:
+        LoudnessPlayer: all
+        LoudnessPlayerWidget: all
+    test:
+      gatherCoverageData: true
+      targets:
+        - LoudnessPlayerTests
+    run:
+      config: Debug
+    archive:
+      config: Release
