@@ -1,6 +1,6 @@
 import Foundation
 
-struct FileImporter: Sendable {
+actor FileImporter {
     private let metadataReader: any AudioMetadataReading
     private let bookmarkCreator: any BookmarkCreating
     private let fingerprinting: any AudioFingerprinting
