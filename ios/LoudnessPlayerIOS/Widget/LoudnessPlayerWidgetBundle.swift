@@ -20,9 +20,14 @@ private struct PlaceholderProvider: TimelineProvider {
 private struct PlaceholderWidgetView: View {
     let entry: PlaceholderEntry
 
+    @ViewBuilder
     var body: some View {
-        Text("音悦")
-            .containerBackground(.fill.tertiary, for: .widget)
+        if #available(iOSApplicationExtension 17.0, *) {
+            Text("音悦")
+                .containerBackground(.fill.tertiary, for: .widget)
+        } else {
+            Text("音悦")
+        }
     }
 }
 
