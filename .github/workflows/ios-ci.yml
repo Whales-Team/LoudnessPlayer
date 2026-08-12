@@ -94,6 +94,12 @@ jobs:
           chmod +x Scripts/verify-ffmpeg.sh
           Scripts/verify-ffmpeg.sh
 
+      - name: Download FFmpeg conformance fixtures
+        working-directory: ios/LoudnessPlayerIOS
+        run: |
+          chmod +x Scripts/download-codec-fixtures.sh
+          Scripts/download-codec-fixtures.sh
+
       - name: Run tests and build
         working-directory: ios/LoudnessPlayerIOS
         run: |

@@ -11,4 +11,5 @@ ios/LoudnessPlayerIOS/*.xcodeproj
 ios/LoudnessPlayerIOS/build/
 ios/LoudnessPlayerIOS/DerivedData/
 ios/LoudnessPlayerIOS/Vendor/Artifacts/
+ios/LoudnessPlayerIOS/Fixtures/Runtime/
 *.xcresult
