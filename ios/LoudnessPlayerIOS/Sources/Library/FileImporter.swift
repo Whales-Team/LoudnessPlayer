@@ -20,21 +20,7 @@ actor FileImporter {
 
     func importDirectory(_ root: URL, existing: [AudioTrack]) async -> ImportResult {
         do {
-            let keys: [URLResourceKey] = [.isRegularFileKey, .isHiddenKey]
-            guard let enumerator = fileManager.enumerator(
-                at: root, includingPropertiesForKeys: keys,
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) else {
-                return ImportResult(imported: [], skipped: 0, failures: [
-                    ImportFailure(fileName: root.lastPathComponent, message: "无法读取所选文件夹"),
-                ])
-            }
-            var urls: [URL] = []
-            for case let url as URL in enumerator {
-                try Task.checkCancellation()
-                let values = try url.resourceValues(forKeys: Set(keys))
-                if values.isRegularFile == true, values.isHidden != true { urls.append(url) }
-            }
+            let urls = try enumerateFiles(at: root)
             return await importFiles(urls, existing: existing)
         } catch is CancellationError {
             return .empty
@@ -43,6 +29,21 @@ actor FileImporter {
                 ImportFailure(fileName: root.lastPathComponent, message: error.localizedDescription),
             ])
         }
+    }
+
+    private func enumerateFiles(at root: URL) throws -> [URL] {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isHiddenKey]
+        guard let enumerator = fileManager.enumerator(
+            at: root, includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { throw CocoaError(.fileReadUnknown) }
+        var urls: [URL] = []
+        while let url = enumerator.nextObject() as? URL {
+            if Task.isCancelled { throw CancellationError() }
+            let values = try url.resourceValues(forKeys: Set(keys))
+            if values.isRegularFile == true, values.isHidden != true { urls.append(url) }
+        }
+        return urls
     }
 
     func importFiles(_ urls: [URL], existing: [AudioTrack]) async -> ImportResult {
