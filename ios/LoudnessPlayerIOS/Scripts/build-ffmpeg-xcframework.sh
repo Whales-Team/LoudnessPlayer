@@ -30,7 +30,7 @@ build_slice() {
   local prefix="$BUILD_ROOT/$name/install" work="$BUILD_ROOT/$name/work"
   rm -rf "$work" "$prefix"; mkdir -p "$work" "$prefix"
   pushd "$work" >/dev/null
-  extra=(); [[ "$arch" == "x86_64" ]] && extra+=(--disable-x86asm)
+  extra=(--disable-x86asm); [[ "$arch" != "x86_64" ]] && extra=(--enable-asm)
   "$SOURCE_ROOT/configure" "${common[@]}" "${extra[@]}" --arch="$arch" \
     --cc="$(xcrun --sdk "$sdk" --find clang)" --ar="$(xcrun --sdk "$sdk" --find ar)" \
     --ranlib="$(xcrun --sdk "$sdk" --find ranlib)" --sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)" \
