@@ -7,6 +7,20 @@ final class FFmpegAudioDecoder: AudioDecoder, @unchecked Sendable {
     private var handle: OpaquePointer?
     private var streamInfo: AudioStreamInfo?
     private var cancelled = false
+    private var decodedFrames: Int64 = 0
+    private var didReachEnd = false
+
+    var resolvedInfo: AudioStreamInfo? {
+        lock.withCriticalSection {
+            guard didReachEnd, let streamInfo else { return nil }
+            return AudioStreamInfo(
+                sampleRate: streamInfo.sampleRate,
+                channels: streamInfo.channels,
+                totalFrames: decodedFrames,
+                containerDuration: .nan
+            )
+        }
+    }
 
     deinit { if let handle { lp_ffmpeg_close(handle) } }
 
@@ -21,9 +35,13 @@ final class FFmpegAudioDecoder: AudioDecoder, @unchecked Sendable {
             guard let opened else { throw FFmpegDecoderError.message(String(cString: error)) }
             handle = opened
             cancelled = false
+            decodedFrames = 0
+            didReachEnd = false
+            let distrustContainerDuration = ["ape", "wma"].contains(url.pathExtension.lowercased())
             let info = AudioStreamInfo(
                 sampleRate: Double(raw.sample_rate), channels: Int(raw.channels),
-                totalFrames: raw.total_frames, containerDuration: raw.duration
+                totalFrames: distrustContainerDuration ? -1 : raw.total_frames,
+                containerDuration: distrustContainerDuration ? .nan : raw.duration
             )
             streamInfo = info
             return info
@@ -42,11 +60,12 @@ final class FFmpegAudioDecoder: AudioDecoder, @unchecked Sendable {
             let frames = samples.withUnsafeMutableBufferPointer { output in
                 lp_ffmpeg_read(handle, output.baseAddress, Int32(maxFrames), &error, Int32(error.count))
             }
-            if frames == 0 { return nil }
+            if frames == 0 { didReachEnd = true; return nil }
             if frames < 0 {
                 if cancelled { throw DecoderError.cancelled }
                 throw FFmpegDecoderError.message(String(cString: error))
             }
+            decodedFrames += Int64(frames)
             samples.removeLast(samples.count - Int(frames) * streamInfo.channels)
             return PCMChunk(
                 samples: samples, frameCount: AVAudioFrameCount(frames),

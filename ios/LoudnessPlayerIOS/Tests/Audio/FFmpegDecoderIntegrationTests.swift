@@ -28,7 +28,7 @@ final class FFmpegDecoderIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(info.sampleRate, 0)
         XCTAssertGreaterThan(info.channels, 0)
         XCTAssertTrue(info.duration.isFinite)
-        XCTAssertGreaterThan(info.duration, 0)
+        XCTAssertGreaterThanOrEqual(info.duration, 0)
 
         var decodedFrames: Int64 = 0
         var samplePeak: Float = 0
@@ -40,6 +40,8 @@ final class FFmpegDecoderIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(decodedFrames, 0)
         XCTAssertGreaterThan(samplePeak, 0.000_1)
         let decodedDuration = Double(decodedFrames) / info.sampleRate
-        XCTAssertEqual(info.duration, decodedDuration, accuracy: max(0.25, decodedDuration * 0.02))
+        let resolved = try XCTUnwrap(decoder.resolvedInfo)
+        XCTAssertEqual(resolved.totalFrames, decodedFrames)
+        XCTAssertEqual(resolved.duration, decodedDuration, accuracy: 0.000_1)
     }
 }
