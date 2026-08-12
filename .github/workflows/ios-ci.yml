@@ -27,7 +27,7 @@ jobs:
   simulator:
     name: Tests and unsigned simulator app
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 120
 
     steps:
       - name: Check out source
@@ -73,6 +73,26 @@ jobs:
           ')"
           xcrun simctl create "LoudnessPlayer CI" "$device_type" "$runtime_id"
           xcrun simctl list devices available
+
+      - name: Restore slim FFmpeg cache
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ios/LoudnessPlayerIOS/Vendor/Artifacts
+          key: ffmpeg-ios-n8.0.3-${{ hashFiles('ios/LoudnessPlayerIOS/Scripts/build-ffmpeg-xcframework.sh') }}
+
+      - name: Build slim LGPL FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        working-directory: ios/LoudnessPlayerIOS
+        run: |
+          chmod +x Scripts/build-ffmpeg-xcframework.sh
+          Scripts/build-ffmpeg-xcframework.sh
+
+      - name: Verify FFmpeg slices and license flags
+        working-directory: ios/LoudnessPlayerIOS
+        run: |
+          chmod +x Scripts/verify-ffmpeg.sh
+          Scripts/verify-ffmpeg.sh
 
       - name: Run tests and build
         working-directory: ios/LoudnessPlayerIOS

@@ -17,6 +17,21 @@ settings:
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
 
 targets:
+  FFmpegAudioBridge:
+    type: framework.static
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: Vendor/FFmpegAudioBridge
+        headerVisibility: public
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wzl.loudnessplayer.ios.ffmpegbridge
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+    dependencies:
+      - framework: Vendor/Artifacts/FFmpegAudio.xcframework
+
   LoudnessPlayer:
     type: application
     platform: iOS
@@ -30,6 +45,7 @@ targets:
         INFOPLIST_FILE: Config/App-Info.plist
         CODE_SIGNING_ALLOWED: NO
     dependencies:
+      - target: FFmpegAudioBridge
       - target: LoudnessPlayerWidget
         embed: true
 
