@@ -103,8 +103,8 @@ LPFFmpegDecoder *lp_ffmpeg_open(
     if (!decoder->packet || !decoder->frame) { lp_free(decoder); return NULL; }
 
     double duration = NAN;
-    if (stream->duration != AV_NOPTS_VALUE) duration = stream->duration * av_q2d(stream->time_base);
-    else if (decoder->format->duration != AV_NOPTS_VALUE) duration = decoder->format->duration / (double)AV_TIME_BASE;
+    if (decoder->format->duration != AV_NOPTS_VALUE) duration = decoder->format->duration / (double)AV_TIME_BASE;
+    else if (stream->duration != AV_NOPTS_VALUE) duration = stream->duration * av_q2d(stream->time_base);
     int64_t frames = isfinite(duration) && duration >= 0 ? (int64_t)llround(duration * decoder->sample_rate) : -1;
     *info = (LPFFmpegStreamInfo){decoder->sample_rate, decoder->channels, frames, duration};
     return decoder;

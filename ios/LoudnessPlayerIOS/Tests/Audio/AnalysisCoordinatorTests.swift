@@ -42,7 +42,7 @@ final class AnalysisCoordinatorTests: XCTestCase {
         let tracks = [analysisTrack(), analysisTrack()]
 
         await coordinator.start(tracks: tracks)
-        await Task.yield()
+        while await probe.startedIDs().count < 2 { await Task.yield() }
         await coordinator.playbackDidStart()
         await coordinator.waitUntilIdle()
 

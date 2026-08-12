@@ -4,7 +4,7 @@ import XCTest
 
 final class FFmpegDecoderIntegrationTests: XCTestCase {
     func testBundledAPEFixtureDecodesFiniteAudiblePCM() throws {
-        try assertDecodes("NoLegacy-cut", extension: "ape")
+        try assertDecodes("luckynight-mac388-c2000", extension: "ape")
     }
 
     func testBundledWMAFixtureDecodesFiniteAudiblePCM() throws {
