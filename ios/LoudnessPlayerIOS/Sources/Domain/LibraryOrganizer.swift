@@ -6,10 +6,10 @@ enum LibraryOrganizer {
         return tracks.filter {
             query.isEmpty || normalize($0.title).contains(query) || normalize($0.artist).contains(query)
         }.sorted {
-            let order = $0.title.localizedStandardCompare($1.title)
+            let order = alphabeticalKey($0.title).localizedStandardCompare(alphabeticalKey($1.title))
             if order != .orderedSame { return order == .orderedAscending }
             if $0.artist.isEmpty != $1.artist.isEmpty { return !$0.artist.isEmpty }
-            return $0.artist.localizedStandardCompare($1.artist) == .orderedAscending
+            return alphabeticalKey($0.artist).localizedStandardCompare(alphabeticalKey($1.artist)) == .orderedAscending
         }
     }
 
@@ -72,5 +72,12 @@ enum LibraryOrganizer {
     private static func normalize(_ value: String) -> String {
         value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
             .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func alphabeticalKey(_ value: String) -> String {
+        let mutable = NSMutableString(string: value)
+        CFStringTransform(mutable, nil, kCFStringTransformToLatin, false)
+        CFStringTransform(mutable, nil, kCFStringTransformStripCombiningMarks, false)
+        return normalize(mutable as String)
     }
 }
